@@ -16,8 +16,8 @@ func TestMultiLeader_AllNodesAcceptWrites(t *testing.T) {
 	orch := simulation.NewOrchestrator(bus)
 
 	cluster, err := orch.CreateCluster(simulation.ClusterConfig{
-		Strategy:        node.StrategyMultiLeader,
-		NodeCount:       3,
+		Strategy:         node.StrategyMultiLeader,
+		NodeCount:        3,
 		ConflictResolver: "lww",
 	})
 	require.NoError(t, err)
@@ -40,8 +40,8 @@ func TestMultiLeader_ConflictDetection(t *testing.T) {
 	orch := simulation.NewOrchestrator(bus)
 
 	cluster, err := orch.CreateCluster(simulation.ClusterConfig{
-		Strategy:        node.StrategyMultiLeader,
-		NodeCount:       3,
+		Strategy:         node.StrategyMultiLeader,
+		NodeCount:        3,
 		ConflictResolver: "lww",
 	})
 	require.NoError(t, err)

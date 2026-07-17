@@ -21,8 +21,8 @@ type NodeRole string
 const (
 	RoleLeader   NodeRole = "leader"
 	RoleFollower NodeRole = "follower"
-	RoleReplica  NodeRole = "replica"  // for leaderless
-	RolePrimary  NodeRole = "primary"  // for multi-leader (all primaries)
+	RoleReplica  NodeRole = "replica" // for leaderless
+	RolePrimary  NodeRole = "primary" // for multi-leader (all primaries)
 )
 
 type NodeState string

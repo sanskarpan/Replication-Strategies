@@ -204,8 +204,8 @@ func (c *ClusterMetrics) Snapshot() ClusterSnapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	snap := ClusterSnapshot{
-		ClusterID:  c.ClusterID,
-		Strategy:   c.Strategy,
+		ClusterID:   c.ClusterID,
+		Strategy:    c.Strategy,
 		TotalWrites: c.TotalWrites,
 		TotalReads:  c.TotalReads,
 		StartTime:   c.StartTime,

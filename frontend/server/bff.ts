@@ -9,20 +9,48 @@ const upstreams = new Map<string, WebSocket>();
 
 // Bundle the client entrypoint so the browser receives resolvable JavaScript.
 // Serving raw main.ts would ship bare imports ("d3", "./api/client") that no
-// browser can resolve — the page would render nothing. Bundled lazily and cached.
+// browser can resolve — the page would render nothing.
+//
+// In dev (NODE_ENV !== "production"), the cache is invalidated when any file under
+// src/ changes, so client edits show up on refresh without a server restart. In prod
+// it is bundled once and cached forever.
+const IS_PROD = process.env.NODE_ENV === "production";
 let bundlePromise: Promise<string> | null = null;
-async function getBundle(): Promise<string> {
-  if (!bundlePromise) {
-    bundlePromise = Bun.build({ entrypoints: ["src/main.ts"], target: "browser" }).then(
-      async (b) => {
-        if (!b.success) {
-          console.error("main.ts bundle failed:", b.logs);
-          throw new AggregateError(b.logs, "bundle failed");
-        }
-        return await b.outputs[0].text();
-      }
-    );
+let bundledMtime = 0;
+
+async function srcMtime(): Promise<number> {
+  // Newest mtime across the client source tree.
+  const { readdir, stat } = await import("node:fs/promises");
+  let newest = 0;
+  async function walk(dir: string) {
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) await walk(p);
+      else newest = Math.max(newest, (await stat(p)).mtimeMs);
+    }
   }
+  await walk("src");
+  return newest;
+}
+
+async function buildBundle(): Promise<string> {
+  const b = await Bun.build({ entrypoints: ["src/main.ts"], target: "browser" });
+  if (!b.success) {
+    console.error("main.ts bundle failed:", b.logs);
+    throw new AggregateError(b.logs, "bundle failed");
+  }
+  return await b.outputs[0].text();
+}
+
+async function getBundle(): Promise<string> {
+  if (!IS_PROD) {
+    const mtime = await srcMtime();
+    if (mtime > bundledMtime) {
+      bundledMtime = mtime;
+      bundlePromise = buildBundle();
+    }
+  }
+  if (!bundlePromise) bundlePromise = buildBundle();
   return bundlePromise;
 }
 

@@ -194,11 +194,11 @@ func (n *MultiLeaderNode) receiveRemoteWrite(remote *storage.KVEntry) {
 	n.store.Set(&winner)
 
 	n.publishEvent(events.EvtConflictResolved, map[string]interface{}{
-		"conflict_id":  c.ID,
-		"resolver":     string(resolution.ResolverType),
-		"reason":       resolution.Reason,
-		"winner_node":  resolution.Winner.NodeID,
-		"winner_ts":    resolution.Winner.Timestamp,
+		"conflict_id": c.ID,
+		"resolver":    string(resolution.ResolverType),
+		"reason":      resolution.Reason,
+		"winner_node": resolution.Winner.NodeID,
+		"winner_ts":   resolution.Winner.Timestamp,
 	})
 }
 
@@ -300,7 +300,6 @@ func (n *MultiLeaderNode) Read(key string, clientID string) (*storage.KVEntry, e
 	n.metrics.RecordRead(0)
 	return entry, nil
 }
-
 
 func (n *MultiLeaderNode) GetConflicts() []*conflict.Conflict {
 	n.mu.RLock()

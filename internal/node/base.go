@@ -63,7 +63,7 @@ func (b *BaseNode) ClusterID() string                   { return b.clusterID }
 func (b *BaseNode) GetLog() *replication.ReplicationLog { return b.log }
 func (b *BaseNode) GetStore() *storage.Store            { return b.store }
 func (b *BaseNode) GetMetrics() *metrics.NodeMetrics    { return b.metrics }
-func (b *BaseNode) Inbox() chan interface{}              { return b.inbox }
+func (b *BaseNode) Inbox() chan interface{}             { return b.inbox }
 
 func (b *BaseNode) Role() NodeRole {
 	b.mu.RLock()

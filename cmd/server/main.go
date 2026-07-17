@@ -26,7 +26,7 @@ func main() {
 	orch := simulation.NewOrchestrator(bus)
 	orch.SetMaxClusters(cfg.Simulation.MaxClusters)
 
-	srv := gateway.NewServer(orch, bus)
+	srv := gateway.NewServer(orch, bus, cfg.Server.CORSOrigins)
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	httpServer := &http.Server{
 		Addr:    addr,
