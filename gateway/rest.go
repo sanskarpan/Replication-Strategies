@@ -167,6 +167,18 @@ func (s *Server) handleClusterState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c.GetState())
 }
 
+// handleConvergence reports whether all online replicas agree on every key (the
+// invariant anti-entropy/read-repair must satisfy once the cluster quiesces).
+func (s *Server) handleConvergence(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	report, err := s.orch.CheckConvergence(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
 func (s *Server) handleClusterConfig(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	c, err := s.orch.GetCluster(id)

@@ -553,3 +553,23 @@ func TestISSUE32_Leaderless_ReadQuorumNotMet(t *testing.T) {
 	require.Error(t, err, "read must fail when R responses are unreachable")
 	assert.Contains(t, err.Error(), "quorum not met")
 }
+
+// §1: the convergence checker detects agreement/divergence across online replicas.
+func TestConvergence_Checker(t *testing.T) {
+	bus := events.NewEventBus(1000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{
+		Strategy: node.StrategyMultiLeader, NodeCount: 3, ConflictResolver: "lww",
+	})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
+	require.NoError(t, err)
+	time.Sleep(1500 * time.Millisecond) // anti-entropy converges
+
+	rep, err := orch.CheckConvergence(cluster.ID)
+	require.NoError(t, err)
+	assert.True(t, rep.Converged, "all replicas must agree after quiesce: %+v", rep.Diverged)
+	assert.GreaterOrEqual(t, rep.Keys, 1)
+}

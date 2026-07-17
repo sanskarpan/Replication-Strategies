@@ -204,3 +204,17 @@ func TestGateway_ConsistencyDemos_ShowViolations(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(body), &pfx))
 	assert.NotNil(t, pfx["observed"])
 }
+
+// §1: the convergence endpoint reports agreement across online replicas.
+func TestGateway_Convergence(t *testing.T) {
+	ts, _ := newTestServer(t)
+	cid := createCluster(t, ts.URL, `{"strategy":"single_leader","node_count":3,"replication_mode":"async"}`)
+	code, _ := doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/write", `{"key":"k","value":"v","client_id":"c"}`)
+	require.Equal(t, http.StatusOK, code)
+	time.Sleep(300 * time.Millisecond)
+	code, body := doJSON(t, "GET", ts.URL+"/api/v1/clusters/"+cid+"/convergence", "")
+	require.Equal(t, http.StatusOK, code)
+	var rep map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &rep))
+	assert.Equal(t, true, rep["converged"])
+}

@@ -45,6 +45,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/clusters", s.handleListClusters)
 		r.Delete("/clusters/{id}", s.handleDeleteCluster)
 		r.Get("/clusters/{id}/state", s.handleClusterState)
+		r.Get("/clusters/{id}/convergence", s.handleConvergence)
 		r.Patch("/clusters/{id}/config", s.handleClusterConfig)
 
 		// Writes & reads
