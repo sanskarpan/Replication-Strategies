@@ -606,3 +606,42 @@ func TestHLC_CausalOrderSurvivesClockSkew(t *testing.T) {
 	assert.Equal(t, []byte("v2"), res.Entry.(*storage.KVEntry).Value,
 		"causally-later write must win despite the writer's skewed-behind clock (HLC)")
 }
+
+// §1: the phi-accrual detector suspects a node that stops heartbeating (paused).
+func TestPhiAccrual_SuspectsPausedNode(t *testing.T) {
+	bus := events.NewEventBus(1000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{Strategy: node.StrategyLeaderless, NodeCount: 3})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	time.Sleep(1500 * time.Millisecond) // build heartbeat history for all nodes
+	victim := cluster.NodeIDs[1]
+	require.NoError(t, orch.PauseNode(cluster.ID, victim))
+	time.Sleep(2500 * time.Millisecond) // silence -> suspicion rises
+
+	sus, err := orch.Suspicion(cluster.ID, 8.0)
+	require.NoError(t, err)
+	assert.True(t, sus[victim].Suspected, "paused node should be suspected (phi=%.1f)", sus[victim].Phi)
+	assert.False(t, sus[cluster.NodeIDs[0]].Suspected, "an online node should not be suspected")
+}
+
+// §1: consistent-hash placement returns a stable preference list of distinct replicas.
+func TestPlacement_PreferenceList(t *testing.T) {
+	bus := events.NewEventBus(1000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{Strategy: node.StrategyLeaderless, NodeCount: 5})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	a, err := orch.Placement(cluster.ID, "mykey", 3)
+	require.NoError(t, err)
+	assert.Len(t, a, 3, "preference list of 3 distinct nodes")
+	b, _ := orch.Placement(cluster.ID, "mykey", 3)
+	assert.Equal(t, a, b, "placement is deterministic for the same key+membership")
+	seen := map[string]bool{}
+	for _, n := range a {
+		assert.False(t, seen[n], "no duplicate replicas")
+		seen[n] = true
+	}
+}
