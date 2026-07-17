@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -101,4 +102,45 @@ func TestRaft_WriteNotLeaderRejected(t *testing.T) {
 	}
 	_, err = orch.Write(cluster.ID, follower, "k", []byte("v"), "c1")
 	assert.Error(t, err, "a follower must reject writes and redirect to the leader")
+}
+
+// A follower that is offline while the leader compacts its log must catch up via an
+// InstallSnapshot (the entries it missed no longer exist as log entries).
+func TestRaft_SnapshotCatchUp(t *testing.T) {
+	bus := events.NewEventBus(4000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{Strategy: node.StrategyRaft, NodeCount: 3})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	require.Eventually(t, func() bool { return raftLeader(cluster) != "" }, 3*time.Second, 30*time.Millisecond)
+	leader := raftLeader(cluster)
+	var follower string
+	for _, id := range cluster.NodeIDs {
+		if id != leader {
+			follower = id
+			break
+		}
+	}
+	// Take the follower offline, then write past the compaction threshold (30).
+	require.NoError(t, orch.PauseNode(cluster.ID, follower))
+	for i := 0; i < 45; i++ {
+		_, err := orch.Write(cluster.ID, "", "k", []byte(fmt.Sprintf("v%d", i)), "c1")
+		require.NoError(t, err)
+	}
+
+	// The leader's log must have compacted (a snapshot boundary exists).
+	ln, _ := cluster.GetNode(leader)
+	require.Eventually(t, func() bool {
+		si, _ := ln.GetLog().SnapshotBoundary()
+		return si > 0
+	}, 2*time.Second, 50*time.Millisecond, "leader must compact its log")
+
+	// Bring the follower back — it can only catch up via a snapshot.
+	require.NoError(t, orch.ResumeNode(cluster.ID, follower))
+	fn, _ := cluster.GetNode(follower)
+	require.Eventually(t, func() bool {
+		e, ok := fn.GetStore().Get("k")
+		return ok && string(e.Value) == "v44"
+	}, 4*time.Second, 50*time.Millisecond, "recovered follower must catch up to the latest value via snapshot")
 }
