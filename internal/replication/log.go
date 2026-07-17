@@ -99,3 +99,67 @@ func (l *ReplicationLog) TruncateFrom(index uint64) {
 	l.entries = l.entries[:index-1]
 	l.nextIndex = index
 }
+
+// --- Raft helpers ---
+
+// TermAt returns the term of the entry at index, or 0 for index 0 / absent.
+func (l *ReplicationLog) TermAt(index uint64) uint64 {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if index == 0 || index >= l.nextIndex {
+		return 0
+	}
+	return l.entries[index-1].Term
+}
+
+// LastIndexTerm returns the index and term of the last log entry.
+func (l *ReplicationLog) LastIndexTerm() (uint64, uint64) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	last := l.nextIndex - 1
+	if last == 0 {
+		return 0, 0
+	}
+	return last, l.entries[last-1].Term
+}
+
+// Matches reports whether the log contains an entry at prevIndex with prevTerm (the
+// Raft AppendEntries consistency check). prevIndex 0 always matches (empty prefix).
+func (l *ReplicationLog) Matches(prevIndex, prevTerm uint64) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if prevIndex == 0 {
+		return true
+	}
+	if prevIndex >= l.nextIndex {
+		return false
+	}
+	return l.entries[prevIndex-1].Term == prevTerm
+}
+
+// AppendAfter applies Raft AppendEntries: for each incoming entry (which carries its
+// absolute Index and Term), if an existing entry at that index has a different term the
+// log is truncated from there, then the entry is appended. Entries already present with
+// the same term are skipped. Returns the new last index.
+func (l *ReplicationLog) AppendAfter(prevIndex uint64, entries []storage.LogEntry) uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, e := range entries {
+		idx := e.Index
+		if idx < l.nextIndex {
+			// existing entry at this index
+			if l.entries[idx-1].Term == e.Term {
+				continue // already have it
+			}
+			// conflict: truncate everything from idx and append
+			l.entries = l.entries[:idx-1]
+			l.nextIndex = idx
+		}
+		// append (idx should equal nextIndex now)
+		if idx == l.nextIndex {
+			l.entries = append(l.entries, e)
+			l.nextIndex++
+		}
+	}
+	return l.nextIndex - 1
+}
