@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -177,6 +178,35 @@ func (s *Server) handleConvergence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, report)
+}
+
+// handleSuspicion reports each node's phi-accrual suspicion level (inferred failure).
+func (s *Server) handleSuspicion(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sus, err := s.orch.Suspicion(id, 0)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"threshold": simulation.DefaultPhiThreshold, "nodes": sus})
+}
+
+// handlePlacement returns the consistent-hashing preference list for a key.
+func (s *Server) handlePlacement(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	key := r.URL.Query().Get("key")
+	n := 3
+	if v := r.URL.Query().Get("n"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			n = parsed
+		}
+	}
+	list, err := s.orch.Placement(id, key, n)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"key": key, "preference_list": list})
 }
 
 func (s *Server) handleClusterConfig(w http.ResponseWriter, r *http.Request) {
