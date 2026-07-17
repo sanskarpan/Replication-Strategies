@@ -21,8 +21,8 @@ Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL**
 - ✅ **§1 — atomic multi-key batches** (PR #104).
 - ✅ **§1 — manual conflict resolution / siblings** (PR #105).
 - ⏳ **§1 remaining:** full preference-list routing for leaderless (changes quorum semantics — deferred to a careful dedicated change).
-- ⏳ **XL items (dedicated waves):** real Raft election, log matching + snapshots, Paxos,
-  deterministic simulation, SWIM gossip, MVCC, 2PC, Merkle anti-entropy.
+- ✅ **XL — real Raft consensus** (PR #107): leader election, log replication + log-matching, majority commit, automatic failover; usable as a 4th strategy.
+- ⏳ **XL remaining (dedicated waves):** log snapshots/compaction, Paxos, deterministic simulation, SWIM gossip, MVCC, 2PC, Merkle anti-entropy.
 
 Each shipped item is implemented with tests, verified `-race` clean, and confirmed by the
 Playwright browser E2E (19/19).
