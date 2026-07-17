@@ -37,6 +37,62 @@ func (o *Orchestrator) runHeartbeats(c *Cluster) {
 	}
 }
 
+// PendingConflict is a parked multi-leader conflict awaiting manual resolution.
+type PendingConflict struct {
+	NodeID    string `json:"node_id"`
+	Key       string `json:"key"`
+	LocalVal  string `json:"local_value"`
+	RemoteVal string `json:"remote_value"`
+}
+
+// ListConflicts aggregates parked (manual) conflicts across all multi-leader nodes.
+func (o *Orchestrator) ListConflicts(clusterID string) ([]PendingConflict, error) {
+	c, err := o.GetCluster(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.RLock()
+	nodes := make(map[string]node.Node, len(c.Nodes))
+	for id, n := range c.Nodes {
+		nodes[id] = n
+	}
+	c.mu.RUnlock()
+	var out []PendingConflict
+	for id, n := range nodes {
+		ml, ok := n.(*node.MultiLeaderNode)
+		if !ok {
+			continue
+		}
+		for _, cf := range ml.PendingConflicts() {
+			out = append(out, PendingConflict{
+				NodeID: id, Key: cf.Key,
+				LocalVal:  string(cf.Local.Value),
+				RemoteVal: string(cf.Remote.Value),
+			})
+		}
+	}
+	return out, nil
+}
+
+// ResolveConflict applies a manual conflict choice on a specific node.
+func (o *Orchestrator) ResolveConflict(clusterID, nodeID, key, choice string) error {
+	c, err := o.GetCluster(clusterID)
+	if err != nil {
+		return err
+	}
+	c.mu.RLock()
+	n, ok := c.Nodes[nodeID]
+	c.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("node %s not found", nodeID)
+	}
+	ml, ok := n.(*node.MultiLeaderNode)
+	if !ok {
+		return fmt.Errorf("manual conflict resolution requires a multi-leader node")
+	}
+	return ml.ResolveConflict(key, choice)
+}
+
 // assignRegions distributes nodes round-robin across cfg.Regions and applies
 // inter-region latency on the fabric so geo-replication tradeoffs are visible.
 func (o *Orchestrator) assignRegions(c *Cluster, cfg ClusterConfig) {

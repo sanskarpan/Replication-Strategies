@@ -253,6 +253,8 @@ func (o *Orchestrator) createMultiLeaderCluster(cluster *Cluster, cfg ClusterCon
 		resolver = conflict.NewCRDTResolver()
 	case conflict.ResolverVectorClock:
 		resolver = conflict.NewVectorClockResolver(nil)
+	case conflict.ResolverManual:
+		resolver = conflict.NewManualResolver()
 	default:
 		resolver = conflict.NewLWWResolver()
 	}

@@ -48,6 +48,8 @@ func (s *Server) Router() http.Handler {
 		r.Get("/clusters/{id}/convergence", s.handleConvergence)
 		r.Get("/clusters/{id}/suspicion", s.handleSuspicion)
 		r.Get("/clusters/{id}/placement", s.handlePlacement)
+		r.Get("/clusters/{id}/conflicts", s.handleListConflicts)
+		r.Post("/clusters/{id}/conflicts/resolve", s.handleResolveConflict)
 		r.Patch("/clusters/{id}/config", s.handleClusterConfig)
 
 		// Writes & reads

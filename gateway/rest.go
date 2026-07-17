@@ -191,6 +191,36 @@ func (s *Server) handleSuspicion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"threshold": simulation.DefaultPhiThreshold, "nodes": sus})
 }
 
+// handleListConflicts lists parked (manual) multi-leader conflicts awaiting a choice.
+func (s *Server) handleListConflicts(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	conflicts, err := s.orch.ListConflicts(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"conflicts": conflicts})
+}
+
+type resolveConflictRequest struct {
+	NodeID string `json:"node_id"`
+	Key    string `json:"key"`
+	Choice string `json:"choice"` // "local" | "remote"
+}
+
+func (s *Server) handleResolveConflict(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req resolveConflictRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.orch.ResolveConflict(id, req.NodeID, req.Key, req.Choice); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved", "key": req.Key, "choice": req.Choice})
+}
+
 // handlePlacement returns the consistent-hashing preference list for a key.
 func (s *Server) handlePlacement(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
