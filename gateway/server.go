@@ -11,13 +11,15 @@ import (
 
 // Server is the HTTP gateway that wraps the Orchestrator.
 type Server struct {
-	orch *simulation.Orchestrator
-	bus  *events.EventBus
+	orch        *simulation.Orchestrator
+	bus         *events.EventBus
+	corsOrigins []string // allow-list; empty or containing "*" => allow any
 }
 
-// NewServer creates a new Server.
-func NewServer(orch *simulation.Orchestrator, bus *events.EventBus) *Server {
-	return &Server{orch: orch, bus: bus}
+// NewServer creates a new Server. corsOrigins is the allowed CORS origin list from
+// config; pass nil/empty for the permissive default.
+func NewServer(orch *simulation.Orchestrator, bus *events.EventBus, corsOrigins []string) *Server {
+	return &Server{orch: orch, bus: bus, corsOrigins: corsOrigins}
 }
 
 // Router builds and returns the HTTP handler tree.
@@ -28,7 +30,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	// Cap request bodies at 1 MiB to prevent unbounded-memory (DoS) via large payloads.
 	r.Use(middleware.RequestSize(1 << 20))
-	r.Use(corsMiddleware)
+	r.Use(s.corsMiddleware)
 
 	// REST API
 	r.Route("/api/v1", func(r chi.Router) {
@@ -82,10 +84,16 @@ func (s *Server) Router() http.Handler {
 	return r
 }
 
-// corsMiddleware adds permissive CORS headers for development use.
-func corsMiddleware(next http.Handler) http.Handler {
+// corsMiddleware applies the configured CORS allow-list. When the list is empty (or
+// contains "*") it stays permissive; otherwise it echoes only allowed origins.
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if allow := s.allowedOrigin(r.Header.Get("Origin")); allow != "" {
+			w.Header().Set("Access-Control-Allow-Origin", allow)
+			if allow != "*" {
+				w.Header().Set("Vary", "Origin")
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
@@ -94,4 +102,26 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// allowedOrigin returns the value to send in Access-Control-Allow-Origin, or "" if
+// the origin is not permitted.
+func (s *Server) allowedOrigin(origin string) string {
+	if len(s.corsOrigins) == 0 {
+		return "*" // permissive default (dev)
+	}
+	for _, o := range s.corsOrigins {
+		if o == "*" {
+			return "*"
+		}
+		if o == origin {
+			return origin
+		}
+	}
+	// No match: fall back to the first configured origin so preflights still get a
+	// concrete header (the browser will block a mismatched Origin anyway).
+	if origin == "" {
+		return s.corsOrigins[0]
+	}
+	return ""
 }
