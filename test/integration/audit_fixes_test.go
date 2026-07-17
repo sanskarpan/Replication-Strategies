@@ -645,3 +645,44 @@ func TestPlacement_PreferenceList(t *testing.T) {
 		seen[n] = true
 	}
 }
+
+// §1: geo-replication assigns nodes to regions and applies inter-region latency,
+// producing visible cross-region replication lag.
+func TestRegions_InterRegionLatency(t *testing.T) {
+	bus := events.NewEventBus(1000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{
+		Strategy: node.StrategyMultiLeader, NodeCount: 4, ConflictResolver: "lww",
+		Regions: 2, InterRegionLatencyMs: 400,
+	})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	st := cluster.GetState()
+	require.Len(t, st.NodeRegions, 4)
+	regionCount := map[int]int{}
+	for _, r := range st.NodeRegions {
+		regionCount[r]++
+	}
+	assert.Len(t, regionCount, 2, "nodes spread across 2 regions")
+
+	// A write in one region should NOT yet be visible in the other (400ms cross-region lag).
+	var r0, r1 string
+	for id, r := range st.NodeRegions {
+		if r == 0 && r0 == "" {
+			r0 = id
+		}
+		if r == 1 && r1 == "" {
+			r1 = id
+		}
+	}
+	_, err = orch.Write(cluster.ID, r0, "k", []byte("v"), "c1")
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond) // well under the 400ms cross-region latency
+	nn, _ := cluster.GetNode(r1)
+	_, present := nn.GetStore().Get("k")
+	assert.False(t, present, "cross-region replica should still lag under inter-region latency")
+	time.Sleep(600 * time.Millisecond) // now it arrives
+	_, present = nn.GetStore().Get("k")
+	assert.True(t, present, "cross-region replica converges after the latency window")
+}
