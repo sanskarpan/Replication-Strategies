@@ -129,7 +129,7 @@ function renderTopology(cluster: ClusterState) {
   const links: TopoLink[] = [];
   const strategy = cluster.config.strategy;
 
-  if (strategy === "single_leader") {
+  if (strategy === "single_leader" || strategy === "raft") {
     const leader = nodes.find((n) => n.role === "leader");
     if (leader) {
       nodes.filter((n) => n.role !== "leader").forEach((f) => {
@@ -562,6 +562,7 @@ function renderControl() {
           <label>Strategy</label>
           <select id="strategy-select">
             <option value="single_leader">Single-Leader</option>
+            <option value="raft">Raft (consensus)</option>
             <option value="multi_leader">Multi-Leader</option>
             <option value="leaderless">Leaderless</option>
           </select>

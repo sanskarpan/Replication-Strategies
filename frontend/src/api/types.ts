@@ -1,4 +1,4 @@
-export type ReplicationStrategy = "single_leader" | "multi_leader" | "leaderless";
+export type ReplicationStrategy = "single_leader" | "multi_leader" | "leaderless" | "raft";
 export type NodeRole = "leader" | "follower" | "replica" | "primary";
 export type NodeState = "online" | "offline" | "paused";
 export type ReplicationMode = "async" | "sync" | "semi_sync";
