@@ -60,6 +60,7 @@ type Node interface {
 	Write(key string, value []byte, clientID string) (*storage.KVEntry, error)
 	Read(key string, clientID string) (*storage.KVEntry, error)
 	Delete(key string, clientID string) error
+	SetClockSkewMillis(ms int64)
 
 	GetState() NodeStatus
 	GetLog() *replication.ReplicationLog
