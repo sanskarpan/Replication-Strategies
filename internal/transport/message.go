@@ -21,6 +21,7 @@ const (
 	MsgHeartbeatAck  MessageType = "heartbeat_ack"
 	MsgVoteRequest   MessageType = "vote_request"
 	MsgVoteResponse  MessageType = "vote_response"
+	MsgInstallSnap   MessageType = "install_snapshot"
 )
 
 type QuorumConfig struct {
@@ -57,4 +58,6 @@ type Message struct {
 	LastLogIndex  uint64 `json:"last_log_index,omitempty"`
 	LastLogTerm   uint64 `json:"last_log_term,omitempty"`
 	VoteGranted   bool   `json:"vote_granted,omitempty"`
+	// Raft InstallSnapshot: PrevLogIndex/PrevLogTerm carry the snapshot boundary.
+	Snapshot []byte `json:"snapshot,omitempty"`
 }

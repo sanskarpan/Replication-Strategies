@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"sync"
 )
 
@@ -93,6 +94,28 @@ func (s *Store) Snapshot() map[string]*KVEntry {
 		snap[k] = v
 	}
 	return snap
+}
+
+// SnapshotBytes serializes the full store (including tombstones) for a Raft snapshot.
+func (s *Store) SnapshotBytes() []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	b, _ := json.Marshal(s.data)
+	return b
+}
+
+// RestoreSnapshot replaces the store contents from a serialized snapshot.
+func (s *Store) RestoreSnapshot(b []byte) error {
+	data := make(map[string]*KVEntry)
+	if len(b) > 0 {
+		if err := json.Unmarshal(b, &data); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	s.data = data
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Store) Version() uint64 {

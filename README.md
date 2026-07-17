@@ -11,6 +11,8 @@ availability, and latency.
   resolved by LWW, vector-clock, or CRDT resolvers; anti-entropy reconciles after a heal.
 - **Leaderless (Dynamo-style)** — tunable `N/W/R` quorums, read repair, hinted handoff,
   and the `W + R > N` overlap guarantee.
+- **Raft (consensus)** — real leader election, log replication with log-matching,
+  majority commit, automatic failover, and log compaction + snapshots.
 
 ## Architecture
 

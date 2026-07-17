@@ -6,7 +6,9 @@ import (
 	"replication-strategies/internal/storage"
 )
 
-// ReplicationLog is an append-only log of LogEntries
+// ReplicationLog is an append-only log of LogEntries with optional prefix compaction
+// (Raft snapshots). Absolute entry index i maps to slice position i-snapshotIndex-1;
+// when no snapshot has been taken snapshotIndex==0 and behavior is a plain 1-based log.
 type ReplicationLog struct {
 	mu      sync.RWMutex
 	entries []storage.LogEntry
@@ -14,6 +16,9 @@ type ReplicationLog struct {
 	commitIndex uint64
 	// nextIndex for new entries
 	nextIndex uint64
+	// snapshot boundary: entries with index <= snapshotIndex have been compacted away.
+	snapshotIndex uint64
+	snapshotTerm  uint64
 }
 
 func NewReplicationLog() *ReplicationLog {
@@ -22,6 +27,9 @@ func NewReplicationLog() *ReplicationLog {
 		nextIndex: 1,
 	}
 }
+
+// pos converts an absolute index to a slice position (may be out of range).
+func (l *ReplicationLog) pos(index uint64) int { return int(index) - int(l.snapshotIndex) - 1 }
 
 func (l *ReplicationLog) Append(entry storage.LogEntry) uint64 {
 	l.mu.Lock()
@@ -35,10 +43,10 @@ func (l *ReplicationLog) Append(entry storage.LogEntry) uint64 {
 func (l *ReplicationLog) Get(index uint64) (storage.LogEntry, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	if index == 0 || index >= l.nextIndex {
+	if index == 0 || index <= l.snapshotIndex || index >= l.nextIndex {
 		return storage.LogEntry{}, false
 	}
-	return l.entries[index-1], true
+	return l.entries[l.pos(index)], true
 }
 
 func (l *ReplicationLog) GetFrom(startIndex uint64) []storage.LogEntry {
@@ -47,7 +55,10 @@ func (l *ReplicationLog) GetFrom(startIndex uint64) []storage.LogEntry {
 	if startIndex >= l.nextIndex {
 		return nil
 	}
-	start := int(startIndex) - 1
+	if startIndex <= l.snapshotIndex {
+		startIndex = l.snapshotIndex + 1
+	}
+	start := l.pos(startIndex)
 	if start < 0 {
 		start = 0
 	}
@@ -96,7 +107,11 @@ func (l *ReplicationLog) TruncateFrom(index uint64) {
 	if index == 0 || index > l.nextIndex {
 		return
 	}
-	l.entries = l.entries[:index-1]
+	p := l.pos(index)
+	if p < 0 {
+		p = 0
+	}
+	l.entries = l.entries[:p]
 	l.nextIndex = index
 }
 
@@ -106,13 +121,19 @@ func (l *ReplicationLog) TruncateFrom(index uint64) {
 func (l *ReplicationLog) TermAt(index uint64) uint64 {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	if index == 0 || index >= l.nextIndex {
+	if index == 0 {
 		return 0
 	}
-	return l.entries[index-1].Term
+	if index == l.snapshotIndex {
+		return l.snapshotTerm
+	}
+	if index <= l.snapshotIndex || index >= l.nextIndex {
+		return 0
+	}
+	return l.entries[l.pos(index)].Term
 }
 
-// LastIndexTerm returns the index and term of the last log entry.
+// LastIndexTerm returns the index and term of the last log entry (or the snapshot).
 func (l *ReplicationLog) LastIndexTerm() (uint64, uint64) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -120,7 +141,10 @@ func (l *ReplicationLog) LastIndexTerm() (uint64, uint64) {
 	if last == 0 {
 		return 0, 0
 	}
-	return last, l.entries[last-1].Term
+	if last == l.snapshotIndex {
+		return last, l.snapshotTerm
+	}
+	return last, l.entries[l.pos(last)].Term
 }
 
 // Matches reports whether the log contains an entry at prevIndex with prevTerm (the
@@ -131,35 +155,88 @@ func (l *ReplicationLog) Matches(prevIndex, prevTerm uint64) bool {
 	if prevIndex == 0 {
 		return true
 	}
-	if prevIndex >= l.nextIndex {
+	if prevIndex == l.snapshotIndex {
+		return prevTerm == l.snapshotTerm
+	}
+	if prevIndex < l.snapshotIndex || prevIndex >= l.nextIndex {
 		return false
 	}
-	return l.entries[prevIndex-1].Term == prevTerm
+	return l.entries[l.pos(prevIndex)].Term == prevTerm
 }
 
-// AppendAfter applies Raft AppendEntries: for each incoming entry (which carries its
-// absolute Index and Term), if an existing entry at that index has a different term the
-// log is truncated from there, then the entry is appended. Entries already present with
-// the same term are skipped. Returns the new last index.
+// AppendAfter applies Raft AppendEntries: for each incoming entry (carrying its absolute
+// Index and Term), a conflicting existing entry truncates the log from that point, then
+// the entry is appended. Entries already present with the same term are skipped.
 func (l *ReplicationLog) AppendAfter(prevIndex uint64, entries []storage.LogEntry) uint64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, e := range entries {
 		idx := e.Index
+		if idx <= l.snapshotIndex {
+			continue // already covered by the snapshot
+		}
 		if idx < l.nextIndex {
-			// existing entry at this index
-			if l.entries[idx-1].Term == e.Term {
+			p := l.pos(idx)
+			if l.entries[p].Term == e.Term {
 				continue // already have it
 			}
-			// conflict: truncate everything from idx and append
-			l.entries = l.entries[:idx-1]
+			l.entries = l.entries[:p] // conflict: truncate and re-append
 			l.nextIndex = idx
 		}
-		// append (idx should equal nextIndex now)
 		if idx == l.nextIndex {
 			l.entries = append(l.entries, e)
 			l.nextIndex++
 		}
 	}
 	return l.nextIndex - 1
+}
+
+// SnapshotBoundary returns the last-included index and term of the current snapshot.
+func (l *ReplicationLog) SnapshotBoundary() (uint64, uint64) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.snapshotIndex, l.snapshotTerm
+}
+
+// Compact discards log entries with index <= uptoIndex (which must be committed and
+// captured in a state snapshot), recording the new snapshot boundary.
+func (l *ReplicationLog) Compact(uptoIndex, term uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if uptoIndex <= l.snapshotIndex {
+		return
+	}
+	if uptoIndex >= l.nextIndex {
+		uptoIndex = l.nextIndex - 1
+	}
+	if uptoIndex <= l.snapshotIndex {
+		return
+	}
+	drop := int(uptoIndex - l.snapshotIndex)
+	if drop > len(l.entries) {
+		drop = len(l.entries)
+	}
+	// term of the last compacted entry (before we drop it)
+	l.snapshotTerm = l.entries[drop-1].Term
+	if term != 0 {
+		l.snapshotTerm = term
+	}
+	l.entries = append([]storage.LogEntry(nil), l.entries[drop:]...)
+	l.snapshotIndex = uptoIndex
+}
+
+// InstallSnapshot resets the log to a snapshot boundary received from the leader.
+func (l *ReplicationLog) InstallSnapshot(index, term uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if index <= l.snapshotIndex {
+		return
+	}
+	l.entries = nil
+	l.snapshotIndex = index
+	l.snapshotTerm = term
+	l.nextIndex = index + 1
+	if l.commitIndex < index {
+		l.commitIndex = index
+	}
 }
