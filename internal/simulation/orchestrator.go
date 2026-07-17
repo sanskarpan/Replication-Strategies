@@ -29,11 +29,11 @@ type ClusterConfig struct {
 // Cluster holds all runtime state for one simulated cluster.
 type Cluster struct {
 	mu       sync.RWMutex
-	ID       string               `json:"id"`
-	Config   ClusterConfig        `json:"config"`
-	Nodes    map[string]node.Node `json:"-"`
-	NodeIDs  []string             `json:"node_ids"`
-	LeaderID string               `json:"leader_id,omitempty"`
+	ID       string                   `json:"id"`
+	Config   ClusterConfig            `json:"config"`
+	Nodes    map[string]node.Node     `json:"-"`
+	NodeIDs  []string                 `json:"node_ids"`
+	LeaderID string                   `json:"leader_id,omitempty"`
 	Fabric   *transport.NetworkFabric `json:"-"`
 	Metrics  *metrics.ClusterMetrics  `json:"-"`
 	ctx      context.Context

@@ -30,17 +30,17 @@ type QuorumConfig struct {
 }
 
 type Message struct {
-	Type     MessageType        `json:"type"`
-	SeqNo    uint64             `json:"seq_no"`
-	SenderID string             `json:"sender_id"`
-	TargetID string             `json:"target_id"`
-	Entries  []storage.LogEntry `json:"entries,omitempty"`
-	Entry    *storage.KVEntry   `json:"entry,omitempty"`
-	AckIndex uint64             `json:"ack_index,omitempty"`
+	Type     MessageType         `json:"type"`
+	SeqNo    uint64              `json:"seq_no"`
+	SenderID string              `json:"sender_id"`
+	TargetID string              `json:"target_id"`
+	Entries  []storage.LogEntry  `json:"entries,omitempty"`
+	Entry    *storage.KVEntry    `json:"entry,omitempty"`
+	AckIndex uint64              `json:"ack_index,omitempty"`
 	VClock   storage.VectorClock `json:"vclock,omitempty"`
-	Quorum   *QuorumConfig      `json:"quorum,omitempty"`
-	Error    string             `json:"error,omitempty"`
-	Key      string             `json:"key,omitempty"`
+	Quorum   *QuorumConfig       `json:"quorum,omitempty"`
+	Error    string              `json:"error,omitempty"`
+	Key      string              `json:"key,omitempty"`
 	// For read repair
 	StaleNodes []string `json:"stale_nodes,omitempty"`
 	// Term for leader election

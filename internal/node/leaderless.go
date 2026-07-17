@@ -35,7 +35,7 @@ type LeaderlessNode struct {
 	// coordinator apply and a concurrent replicated apply for the same key cannot
 	// interleave and lose the newer version (which would break LWW convergence).
 	applyMu sync.Mutex
-	seqNo    uint64
+	seqNo   uint64
 	// pending ack channels keyed by seqNo
 	writeAcks map[uint64]chan string
 	readResps map[uint64]chan readResp
