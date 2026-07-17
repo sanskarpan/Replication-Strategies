@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"replication-strategies/internal/metrics"
 	"replication-strategies/internal/quorum"
 )
 
@@ -61,4 +62,17 @@ func TestQuorumConfig_StaleReadProbability(t *testing.T) {
 
 	q2 := quorum.QuorumConfig{N: 5, W: 1, R: 1}
 	assert.Greater(t, q2.StaleReadProbability(), 0.0, "W=1,R=1 should have non-zero stale probability")
+}
+
+// §1: NodeMetrics.Snapshot computes latency percentiles (not just averages).
+func TestNodeMetrics_Percentiles(t *testing.T) {
+	m := metrics.NewNodeMetrics("n1")
+	for i := 1; i <= 100; i++ {
+		m.RecordWrite(float64(i)) // 1..100 ms
+	}
+	snap := m.Snapshot()
+	assert.InDelta(t, 50, snap.WriteP50, 1.5)
+	assert.InDelta(t, 95, snap.WriteP95, 1.5)
+	assert.InDelta(t, 99, snap.WriteP99, 1.5)
+	assert.GreaterOrEqual(t, snap.WriteP99, snap.WriteP50, "p99 >= p50")
 }
