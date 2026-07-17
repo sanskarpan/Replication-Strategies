@@ -25,22 +25,26 @@ type ClusterConfig struct {
 	QuorumN          int                      `json:"quorum_n,omitempty"`
 	QuorumW          int                      `json:"quorum_w,omitempty"`
 	QuorumR          int                      `json:"quorum_r,omitempty"`
+	// Geo-replication: split nodes across N regions with inter-region latency.
+	Regions              int `json:"regions,omitempty"`
+	InterRegionLatencyMs int `json:"inter_region_latency_ms,omitempty"`
 }
 
 // Cluster holds all runtime state for one simulated cluster.
 type Cluster struct {
-	mu       sync.RWMutex
-	ID       string                   `json:"id"`
-	Config   ClusterConfig            `json:"config"`
-	Nodes    map[string]node.Node     `json:"-"`
-	NodeIDs  []string                 `json:"node_ids"`
-	LeaderID string                   `json:"leader_id,omitempty"`
-	Fabric   *transport.NetworkFabric `json:"-"`
-	Metrics  *metrics.ClusterMetrics  `json:"-"`
-	detector *failure.Detector        `json:"-"` // phi-accrual failure detector
-	ctx      context.Context
-	cancel   context.CancelFunc
-	created  time.Time
+	mu          sync.RWMutex
+	ID          string                   `json:"id"`
+	Config      ClusterConfig            `json:"config"`
+	Nodes       map[string]node.Node     `json:"-"`
+	NodeIDs     []string                 `json:"node_ids"`
+	LeaderID    string                   `json:"leader_id,omitempty"`
+	Fabric      *transport.NetworkFabric `json:"-"`
+	Metrics     *metrics.ClusterMetrics  `json:"-"`
+	detector    *failure.Detector        `json:"-"` // phi-accrual failure detector
+	NodeRegions map[string]int           `json:"-"` // nodeID -> region index (geo)
+	ctx         context.Context
+	cancel      context.CancelFunc
+	created     time.Time
 }
 
 // Mu exposes the cluster mutex for external packages that need to lock it.
@@ -67,7 +71,8 @@ type ClusterState struct {
 	Created    time.Time                       `json:"created"`
 	Partitions map[string]*transport.Partition `json:"partitions"`
 	// DroppedMessages counts back-pressure drops (full queues) — otherwise invisible.
-	DroppedMessages uint64 `json:"dropped_messages"`
+	DroppedMessages uint64         `json:"dropped_messages"`
+	NodeRegions     map[string]int `json:"node_regions,omitempty"`
 }
 
 // GetState takes a consistent snapshot of the cluster.
@@ -88,6 +93,7 @@ func (c *Cluster) GetState() ClusterState {
 		Created:         c.created,
 		Partitions:      c.Fabric.GetPartitions(),
 		DroppedMessages: c.Fabric.Dropped(),
+		NodeRegions:     c.NodeRegions,
 	}
 }
 
@@ -173,6 +179,9 @@ func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
 		cancel()
 		return nil, fmt.Errorf("unknown strategy: %s", cfg.Strategy)
 	}
+
+	// Assign nodes to regions and apply inter-region latency before traffic starts.
+	o.assignRegions(cluster, cfg)
 
 	// Start all nodes.
 	for _, n := range cluster.Nodes {
