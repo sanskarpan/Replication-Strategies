@@ -3,12 +3,54 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"replication-strategies/internal/node"
 	"replication-strategies/internal/simulation"
+	"replication-strategies/internal/storage"
 )
+
+// demoNodes picks a write node (leader if present, else the first node) and a distinct
+// read node, for demonstrating a guarantee against a lagging replica.
+func (s *Server) demoNodes(c *simulation.Cluster) (writeNode, readNode string) {
+	st := c.GetState()
+	if len(st.NodeIDs) == 0 {
+		return "", ""
+	}
+	writeNode = st.NodeIDs[0]
+	if st.LeaderID != "" {
+		writeNode = st.LeaderID
+	}
+	for _, n := range st.NodeIDs {
+		if n != writeNode {
+			readNode = n
+			break
+		}
+	}
+	return writeNode, readNode
+}
+
+// entryValue extracts the stored string value from a Read/Write result, if present.
+func entryValue(res interface{}) (string, bool) {
+	var e *storage.KVEntry
+	switch r := res.(type) {
+	case *simulation.ReadResult:
+		if r != nil {
+			e, _ = r.Entry.(*storage.KVEntry)
+		}
+	case *simulation.WriteResult:
+		if r != nil {
+			e, _ = r.Entry.(*storage.KVEntry)
+		}
+	}
+	if e == nil {
+		return "", false
+	}
+	return string(e.Value), true
+}
 
 // writeJSON encodes v as JSON and writes it with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -410,11 +452,17 @@ type demoRYWResponse struct {
 	ClientID    string      `json:"client_id"`
 	WriteKey    string      `json:"write_key"`
 	WriteValue  string      `json:"write_value"`
+	WriteNode   string      `json:"write_node"`
+	ReadNode    string      `json:"read_node"`
 	WriteResult interface{} `json:"write_result"`
 	ReadResult  interface{} `json:"read_result"`
 	Consistent  bool        `json:"consistent"`
+	Explanation string      `json:"explanation"`
 }
 
+// handleDemoRYW demonstrates read-your-writes by writing on one node and immediately
+// reading the client's own write back from a DIFFERENT replica that is lagging (a
+// latency window is injected), so the demo actually shows the violation when it occurs.
 func (s *Server) handleDemoRYW(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	clientID := "ryw-demo-client"
@@ -426,27 +474,44 @@ func (s *Server) handleDemoRYW(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-
-	writeRes, err := s.orch.Write(id, c.LeaderID, key, []byte(value), clientID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	writeNode, readNode := s.demoNodes(c)
+	if writeNode == "" || readNode == "" {
+		writeError(w, http.StatusBadRequest, "RYW demo requires a cluster with at least two nodes")
 		return
 	}
 
-	// Read back from the same leader — RYW is always satisfied here.
-	readRes, readErr := s.orch.Read(id, c.LeaderID, key, clientID)
-	consistent := readErr == nil
+	// Open a lag window by pausing the read replica so it misses the write, then resume
+	// and immediately read — the replica hasn't caught up yet. (Pause/resume avoids the
+	// FIFO link-latency lingering between successive demo runs.)
+	s.orch.PauseNode(id, readNode) //nolint:errcheck
+	writeRes, werr := s.orch.Write(id, writeNode, key, []byte(value), clientID)
+	if werr != nil {
+		s.orch.ResumeNode(id, readNode) //nolint:errcheck
+		writeError(w, http.StatusConflict, werr.Error())
+		return
+	}
+	time.Sleep(120 * time.Millisecond) // write is delivered-and-dropped at the paused replica
+	s.orch.ResumeNode(id, readNode)    //nolint:errcheck
+	readRes, rerr := s.orch.Read(id, readNode, key, clientID)
+	got, ok := entryValue(readRes)
+	consistent := rerr == nil && ok && got == value
+
+	explanation := fmt.Sprintf("Client wrote %q on %s and immediately read its own write back from %s (RYW held).", value, writeNode, readNode)
+	if !consistent {
+		explanation = fmt.Sprintf("READ-YOUR-WRITES VIOLATED: client wrote %q on %s but the lagging replica %s returned %s — the client could not read its own write.",
+			value, writeNode, readNode, describe(got, ok, rerr))
+	}
 
 	writeJSON(w, http.StatusOK, demoRYWResponse{
-		ClientID:    clientID,
-		WriteKey:    key,
-		WriteValue:  value,
-		WriteResult: writeRes,
-		ReadResult:  readRes,
-		Consistent:  consistent,
+		ClientID: clientID, WriteKey: key, WriteValue: value,
+		WriteNode: writeNode, ReadNode: readNode,
+		WriteResult: writeRes, ReadResult: readRes,
+		Consistent: consistent, Explanation: explanation,
 	})
 }
 
+// handleDemoMonotonic demonstrates monotonic reads: after the client sees v2 on a fresh
+// node, a read from a lagging replica may return the older v1 — reads going backward.
 func (s *Server) handleDemoMonotonic(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	clientID := "monotonic-demo-client"
@@ -457,21 +522,43 @@ func (s *Server) handleDemoMonotonic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	writeNode, readNode := s.demoNodes(c)
+	if writeNode == "" || readNode == "" {
+		writeError(w, http.StatusBadRequest, "monotonic demo requires a cluster with at least two nodes")
+		return
+	}
 
-	s.orch.Write(id, c.LeaderID, key, []byte("v1"), clientID) //nolint:errcheck
-	readRes1, _ := s.orch.Read(id, c.LeaderID, key, clientID)
+	// v1 replicates everywhere, then readNode is paused so it misses v2.
+	s.orch.Write(id, writeNode, key, []byte("v1"), clientID) //nolint:errcheck
+	time.Sleep(200 * time.Millisecond)
+	s.orch.PauseNode(id, readNode)                           //nolint:errcheck
+	s.orch.Write(id, writeNode, key, []byte("v2"), clientID) //nolint:errcheck
+	time.Sleep(120 * time.Millisecond)                       // v2 delivered-and-dropped at paused readNode
+	s.orch.ResumeNode(id, readNode)                          //nolint:errcheck
 
-	s.orch.Write(id, c.LeaderID, key, []byte("v2"), clientID) //nolint:errcheck
-	readRes2, _ := s.orch.Read(id, c.LeaderID, key, clientID)
+	read1, _ := s.orch.Read(id, writeNode, key, clientID) // fresh -> v2
+	read2, _ := s.orch.Read(id, readNode, key, clientID)  // stale -> v1
+	v1, _ := entryValue(read1)
+	v2, _ := entryValue(read2)
+	violated := v1 == "v2" && v2 == "v1"
+
+	explanation := fmt.Sprintf("Client read %q then %q — never went backward (monotonic held).", v1, v2)
+	if violated {
+		explanation = fmt.Sprintf("MONOTONIC READ VIOLATED: client read %q from %s, then the lagging replica %s returned the older %q — the read went backward in time.", v1, writeNode, readNode, v2)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"client_id": clientID,
-		"read1":     readRes1,
-		"read2":     readRes2,
-		"monotonic": true,
+		"client_id":  clientID,
+		"read_node1": writeNode, "read_node2": readNode,
+		"read1": read1, "read2": read2,
+		"monotonic":   !violated,
+		"explanation": explanation,
 	})
 }
 
+// handleDemoConsistentPrefix writes an ordered sequence and reads it back, reporting the
+// ACTUAL observed order (no longer hardcoded). In single-leader the log guarantees the
+// prefix; the response explains that multi-leader reordering can break it.
 func (s *Server) handleDemoConsistentPrefix(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	clientID := "prefix-demo-client"
@@ -481,24 +568,64 @@ func (s *Server) handleDemoConsistentPrefix(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-
-	writes := []struct{ k, v string }{
-		{"prefix-key-1", "first"},
-		{"prefix-key-2", "second"},
-		{"prefix-key-3", "third"},
+	writeNode, readNode := s.demoNodes(c)
+	if writeNode == "" {
+		writeError(w, http.StatusBadRequest, "consistent-prefix demo requires at least one node")
+		return
+	}
+	if readNode == "" {
+		readNode = writeNode
 	}
 
-	results := make([]interface{}, 0, len(writes))
-	for _, entry := range writes {
-		res, _ := s.orch.Write(id, c.LeaderID, entry.k, []byte(entry.v), clientID)
+	seq := []string{"first", "second", "third"}
+	key := "prefix-demo-key"
+	results := make([]interface{}, 0, len(seq))
+	for _, v := range seq {
+		res, _ := s.orch.Write(id, writeNode, key, []byte(v), clientID)
 		results = append(results, res)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	// Read the final value from the read node; a consistent prefix means we observe one
+	// of the sequence values in order (here, the latest), never a value that skipped
+	// earlier writes out of order.
+	readRes, _ := s.orch.Read(id, readNode, key, clientID)
+	got, ok := entryValue(readRes)
+	// Determine the observed position in the sequence.
+	pos := -1
+	for i, v := range seq {
+		if v == got {
+			pos = i
+		}
+	}
+	consistent := !ok || pos >= 0 // any observed value is a valid prefix point in single-leader
+
+	explanation := fmt.Sprintf("Wrote %v in order on %s; replica %s observed %q — a consistent prefix (no out-of-order value).", seq, writeNode, readNode, got)
+	if c.Config.Strategy != node.StrategySingleLeader {
+		explanation += " NOTE: under multi-leader/leaderless, reordered replication can expose an out-of-order prefix."
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"client_id": clientID,
-		"writes":    results,
-		"prefix":    "consistent",
+		"client_id":   clientID,
+		"write_node":  writeNode,
+		"read_node":   readNode,
+		"sequence":    seq,
+		"observed":    got,
+		"writes":      results,
+		"consistent":  consistent,
+		"explanation": explanation,
 	})
+}
+
+// describe renders a read outcome for an explanation string.
+func describe(val string, ok bool, err error) string {
+	if err != nil {
+		return fmt.Sprintf("an error (%v)", err)
+	}
+	if !ok {
+		return "not-found"
+	}
+	return fmt.Sprintf("%q", val)
 }
 
 // ---------------------------------------------------------------------------
