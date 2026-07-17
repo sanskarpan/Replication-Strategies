@@ -17,7 +17,10 @@ Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL**
 - ✅ **§1 — DS primitive packages** (PR #99, built via a parallel workflow + adversarial verify): HLC, consistent-hash ring, phi-accrual detector.
 - ✅ **§1 — HLC integration + clock-skew** (PR #100): writes stamped with HLC, skew API, causal-order-under-skew test.
 - ✅ **§1 — phi-accrual suspicion + hash-ring placement + p99/dropped metrics** (PR #101): `GET /suspicion`, `GET /placement`.
-- ⏳ **§1 remaining (next wave):** region-aware quorums, atomic multi-key batches, manual conflict/siblings, full preference-list routing.
+- ✅ **§1 — geo-regions + inter-region latency** (PR #103).
+- ✅ **§1 — atomic multi-key batches** (PR #104).
+- ✅ **§1 — manual conflict resolution / siblings** (PR #105).
+- ⏳ **§1 remaining:** full preference-list routing for leaderless (changes quorum semantics — deferred to a careful dedicated change).
 - ⏳ **XL items (dedicated waves):** real Raft election, log matching + snapshots, Paxos,
   deterministic simulation, SWIM gossip, MVCC, 2PC, Merkle anti-entropy.
 
