@@ -3,6 +3,7 @@ package transport
 import (
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -49,7 +50,12 @@ type NetworkFabric struct {
 	rng        *rand.Rand
 	done       chan struct{} // closed by Close() to stop all link workers
 	closed     bool
+	dropped    atomic.Uint64 // backpressure drops (full link queue / full inbox)
 }
+
+// Dropped returns the number of messages dropped due to back-pressure (full queues),
+// distinct from configured packet loss — surfaces otherwise-invisible load shedding.
+func (f *NetworkFabric) Dropped() uint64 { return f.dropped.Load() }
 
 func NewNetworkFabric() *NetworkFabric {
 	return &NetworkFabric{
@@ -117,6 +123,7 @@ func (f *NetworkFabric) linkWorker(l *link) {
 			select {
 			case ch <- tm.msg:
 			default:
+				f.dropped.Add(1)
 				// target inbox full — drop
 			}
 		}
@@ -170,6 +177,7 @@ func (f *NetworkFabric) Send(msg Message) {
 	select {
 	case l.ch <- timedMsg{msg: msg, at: at}:
 	default:
+		f.dropped.Add(1)
 		// link queue full — drop (backpressure)
 	}
 }
