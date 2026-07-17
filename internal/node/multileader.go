@@ -109,6 +109,7 @@ func (n *MultiLeaderNode) HandleMessage(raw interface{}) {
 }
 
 func (n *MultiLeaderNode) receiveRemoteWrite(remote *storage.KVEntry) {
+	n.HLCUpdate(remote.Timestamp) // merge remote clock to preserve causal order under skew
 	n.applyMu.Lock()
 	defer n.applyMu.Unlock()
 
@@ -218,7 +219,7 @@ func (n *MultiLeaderNode) Write(key string, value []byte, clientID string) (*sto
 		vc = storage.NewVectorClock()
 	}
 	vc = vc.Increment(n.id)
-	ts := time.Now().UnixNano()
+	ts := n.HLCNow()
 	kvEntry := &storage.KVEntry{
 		Key:       key,
 		Value:     value,
@@ -263,7 +264,7 @@ func (n *MultiLeaderNode) Delete(key string, clientID string) error {
 		vc = storage.NewVectorClock()
 	}
 	vc = vc.Increment(n.id)
-	ts := time.Now().UnixNano()
+	ts := n.HLCNow()
 	tomb := &storage.KVEntry{
 		Key:       key,
 		VClock:    vc,

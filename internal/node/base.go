@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"replication-strategies/internal/clock"
 	"replication-strategies/internal/events"
 	"replication-strategies/internal/metrics"
 	"replication-strategies/internal/replication"
@@ -24,6 +25,7 @@ type BaseNode struct {
 	log     *replication.ReplicationLog
 	metrics *metrics.NodeMetrics
 	bus     *events.EventBus
+	hlc     *clock.HLC // hybrid logical clock stamped on writes (causality + skew-resistance)
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -50,12 +52,23 @@ func newBaseNode(id, clusterID string, strategy ReplicationStrategy, role NodeRo
 		log:       replication.NewReplicationLog(),
 		metrics:   m,
 		bus:       bus,
+		hlc:       clock.NewHLC(),
 		ctx:       ctx,
 		cancel:    cancel,
 		inbox:     make(chan interface{}, 512),
 		peers:     make([]string, 0),
 	}
 }
+
+// HLCNow returns the node's next hybrid-logical-clock timestamp (stamped on writes).
+func (b *BaseNode) HLCNow() int64 { return b.hlc.Now() }
+
+// HLCUpdate merges a received timestamp into the node's clock (call on remote apply)
+// so causal order is preserved even when physical clocks are skewed.
+func (b *BaseNode) HLCUpdate(remote int64) int64 { return b.hlc.Update(remote) }
+
+// SetClockSkewMillis injects a physical-clock offset to demonstrate skew effects.
+func (b *BaseNode) SetClockSkewMillis(ms int64) { b.hlc.SetSkewMillis(ms) }
 
 func (b *BaseNode) ID() string                          { return b.id }
 func (b *BaseNode) Strategy() ReplicationStrategy       { return b.strategy }

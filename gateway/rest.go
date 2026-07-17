@@ -343,6 +343,24 @@ func (s *Server) handleResumeNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resumed"})
 }
 
+type clockSkewRequest struct {
+	Ms int64 `json:"ms"`
+}
+
+func (s *Server) handleSetClockSkew(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	nodeID := chi.URLParam(r, "nodeId")
+	var req clockSkewRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.orch.SetClockSkew(id, nodeID, req.Ms); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "node": nodeID, "skew_ms": req.Ms})
+}
+
 func (s *Server) handleNodeLog(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	nodeID := chi.URLParam(r, "nodeId")

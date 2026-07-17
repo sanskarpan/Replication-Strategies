@@ -174,6 +174,7 @@ func (n *FollowerNode) applyEntries(msg transport.Message) {
 
 // applyOne applies a single log entry to the store and display log. Caller holds applyMu.
 func (n *FollowerNode) applyOne(entry storage.LogEntry) {
+	n.HLCUpdate(entry.Timestamp) // merge leader clock to preserve causal order under skew
 	n.log.Append(entry)
 	kvEntry := &storage.KVEntry{
 		Key:       entry.Key,

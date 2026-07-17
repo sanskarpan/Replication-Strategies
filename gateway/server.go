@@ -59,6 +59,7 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/clusters/{id}/nodes/{nodeId}", s.handleRemoveNode)
 		r.Post("/clusters/{id}/nodes/{nodeId}/pause", s.handlePauseNode)
 		r.Post("/clusters/{id}/nodes/{nodeId}/resume", s.handleResumeNode)
+		r.Post("/clusters/{id}/nodes/{nodeId}/clock-skew", s.handleSetClockSkew)
 		r.Get("/clusters/{id}/nodes/{nodeId}/log", s.handleNodeLog)
 		r.Get("/clusters/{id}/nodes/{nodeId}/store", s.handleNodeStore)
 
