@@ -20,6 +20,7 @@ const (
 	StrategySingleLeader ReplicationStrategy = "single_leader"
 	StrategyMultiLeader  ReplicationStrategy = "multi_leader"
 	StrategyLeaderless   ReplicationStrategy = "leaderless"
+	StrategyRaft         ReplicationStrategy = "raft"
 )
 
 type NodeRole string
