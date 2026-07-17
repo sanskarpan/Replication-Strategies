@@ -686,3 +686,39 @@ func TestRegions_InterRegionLatency(t *testing.T) {
 	_, present = nn.GetStore().Get("k")
 	assert.True(t, present, "cross-region replica converges after the latency window")
 }
+
+// §1: an atomic multi-key batch replicates all-or-nothing as a single unit.
+func TestAtomicBatch_AllKeysReplicate(t *testing.T) {
+	bus := events.NewEventBus(1000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{
+		Strategy: node.StrategySingleLeader, NodeCount: 3, ReplicationMode: node.ModeSync,
+	})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	pairs := []node.KV{{Key: "a", Value: []byte("1")}, {Key: "b", Value: []byte("2")}, {Key: "c", Value: []byte("3")}}
+	entries, err := orch.WriteBatchAtomic(cluster.ID, cluster.LeaderID, pairs, "c1")
+	require.NoError(t, err)
+	require.Len(t, entries, 3)
+	time.Sleep(150 * time.Millisecond)
+
+	// Every follower must have ALL three keys (applied together as one AppendEntries).
+	for _, id := range cluster.NodeIDs {
+		if id == cluster.LeaderID {
+			continue
+		}
+		nn, _ := cluster.GetNode(id)
+		for _, k := range []string{"a", "b", "c"} {
+			_, present := nn.GetStore().Get(k)
+			assert.True(t, present, "follower %s must have batched key %s", id, k)
+		}
+	}
+
+	// Atomic batch is rejected for non-single-leader clusters.
+	ll, err := orch.CreateCluster(simulation.ClusterConfig{Strategy: node.StrategyLeaderless, NodeCount: 3})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(ll.ID)
+	_, err = orch.WriteBatchAtomic(ll.ID, "", pairs, "c1")
+	assert.Error(t, err, "atomic batch requires single-leader")
+}
