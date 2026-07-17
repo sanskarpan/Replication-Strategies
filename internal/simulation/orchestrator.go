@@ -64,6 +64,8 @@ type ClusterState struct {
 	Metrics    metrics.ClusterSnapshot         `json:"metrics"`
 	Created    time.Time                       `json:"created"`
 	Partitions map[string]*transport.Partition `json:"partitions"`
+	// DroppedMessages counts back-pressure drops (full queues) — otherwise invisible.
+	DroppedMessages uint64 `json:"dropped_messages"`
 }
 
 // GetState takes a consistent snapshot of the cluster.
@@ -75,14 +77,15 @@ func (c *Cluster) GetState() ClusterState {
 		nodes[id] = n.GetState()
 	}
 	return ClusterState{
-		ID:         c.ID,
-		Config:     c.Config,
-		NodeIDs:    append([]string{}, c.NodeIDs...),
-		LeaderID:   c.LeaderID,
-		Nodes:      nodes,
-		Metrics:    c.Metrics.Snapshot(),
-		Created:    c.created,
-		Partitions: c.Fabric.GetPartitions(),
+		ID:              c.ID,
+		Config:          c.Config,
+		NodeIDs:         append([]string{}, c.NodeIDs...),
+		LeaderID:        c.LeaderID,
+		Nodes:           nodes,
+		Metrics:         c.Metrics.Snapshot(),
+		Created:         c.created,
+		Partitions:      c.Fabric.GetPartitions(),
+		DroppedMessages: c.Fabric.Dropped(),
 	}
 }
 
