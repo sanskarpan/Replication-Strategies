@@ -573,3 +573,36 @@ func TestConvergence_Checker(t *testing.T) {
 	assert.True(t, rep.Converged, "all replicas must agree after quiesce: %+v", rep.Diverged)
 	assert.GreaterOrEqual(t, rep.Keys, 1)
 }
+
+// §1 (HLC): a node with a badly-skewed (behind) physical clock must still have its
+// causally-later write win, because the hybrid logical clock advanced when it received
+// the earlier write. Pure wall-clock LWW would incorrectly keep the earlier value.
+func TestHLC_CausalOrderSurvivesClockSkew(t *testing.T) {
+	bus := events.NewEventBus(1000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{
+		Strategy: node.StrategyLeaderless, NodeCount: 3, QuorumW: 3, QuorumR: 3,
+	})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	coord, skewed := cluster.NodeIDs[0], cluster.NodeIDs[1]
+	// Skew the second node 10 seconds BEHIND real time.
+	require.NoError(t, orch.SetClockSkew(cluster.ID, skewed, -10000))
+
+	// v1 written by the coordinator (normal clock), replicated to all incl. the skewed node.
+	_, err = orch.Write(cluster.ID, coord, "k", []byte("v1"), "c1")
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// v2 written by the skewed node — causally AFTER v1 (it received v1). Its HLC was
+	// advanced by v1, so v2's timestamp dominates despite the 10s-behind wall clock.
+	_, err = orch.Write(cluster.ID, skewed, "k", []byte("v2"), "c1")
+	require.NoError(t, err)
+	time.Sleep(300 * time.Millisecond)
+
+	res, err := orch.Read(cluster.ID, coord, "k", "c1")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("v2"), res.Entry.(*storage.KVEntry).Value,
+		"causally-later write must win despite the writer's skewed-behind clock (HLC)")
+}
