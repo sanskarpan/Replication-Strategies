@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"replication-strategies/internal/conflict"
 	"replication-strategies/internal/events"
+	"replication-strategies/internal/failure"
 	"replication-strategies/internal/metrics"
 	"replication-strategies/internal/node"
 	"replication-strategies/internal/quorum"
@@ -36,6 +37,7 @@ type Cluster struct {
 	LeaderID string                   `json:"leader_id,omitempty"`
 	Fabric   *transport.NetworkFabric `json:"-"`
 	Metrics  *metrics.ClusterMetrics  `json:"-"`
+	detector *failure.Detector        `json:"-"` // phi-accrual failure detector
 	ctx      context.Context
 	cancel   context.CancelFunc
 	created  time.Time
@@ -138,15 +140,16 @@ func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cluster := &Cluster{
-		ID:      clusterID,
-		Config:  cfg,
-		Nodes:   make(map[string]node.Node),
-		NodeIDs: make([]string, 0, cfg.NodeCount),
-		Fabric:  fabric,
-		Metrics: clusterMetrics,
-		ctx:     ctx,
-		cancel:  cancel,
-		created: time.Now(),
+		ID:       clusterID,
+		Config:   cfg,
+		Nodes:    make(map[string]node.Node),
+		NodeIDs:  make([]string, 0, cfg.NodeCount),
+		Fabric:   fabric,
+		Metrics:  clusterMetrics,
+		detector: failure.NewDetector(),
+		ctx:      ctx,
+		cancel:   cancel,
+		created:  time.Now(),
 	}
 
 	// Create nodes based on strategy.
@@ -175,6 +178,8 @@ func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
 	for _, n := range cluster.Nodes {
 		n.Start(ctx)
 	}
+	// Feed the phi-accrual detector with heartbeats from online nodes.
+	go o.runHeartbeats(cluster)
 
 	o.mu.Lock()
 	if o.maxClusters > 0 && len(o.clusters) >= o.maxClusters {
