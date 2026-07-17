@@ -47,4 +47,14 @@ type Message struct {
 	Term uint64 `json:"term,omitempty"`
 	// For hints
 	OriginalTarget string `json:"original_target,omitempty"`
+	// Raft: AppendEntries consistency check + commit propagation
+	PrevLogIndex uint64 `json:"prev_log_index,omitempty"`
+	PrevLogTerm  uint64 `json:"prev_log_term,omitempty"`
+	LeaderCommit uint64 `json:"leader_commit,omitempty"`
+	// Raft: ack/vote results
+	Success       bool   `json:"success,omitempty"`
+	ConflictIndex uint64 `json:"conflict_index,omitempty"`
+	LastLogIndex  uint64 `json:"last_log_index,omitempty"`
+	LastLogTerm   uint64 `json:"last_log_term,omitempty"`
+	VoteGranted   bool   `json:"vote_granted,omitempty"`
 }
