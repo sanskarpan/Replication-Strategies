@@ -22,8 +22,8 @@ const (
 
 // RaftNode implements a (simplified but real) Raft consensus node: randomized-timeout
 // leader election with the log-up-to-date vote check, AppendEntries with the log-matching
-// consistency check, majority commit, and automatic failover. Snapshots and membership
-// changes are out of scope.
+// consistency check, majority commit, automatic failover, and log compaction with
+// InstallSnapshot catch-up for lagging followers. Membership changes are out of scope.
 type RaftNode struct {
 	*BaseNode
 	fabric   *transport.NetworkFabric
@@ -39,8 +39,11 @@ type RaftNode struct {
 	timeout     time.Duration
 	nextIndex   map[string]uint64
 	matchIndex  map[string]uint64
-	applied     uint64
 	rng         *rand.Rand
+
+	// applyMu guards `applied` (touched by the message loop AND the ticker's compaction).
+	applyMu sync.Mutex
+	applied uint64
 }
 
 func NewRaftNode(id, clusterID string, fabric *transport.NetworkFabric, bus *events.EventBus, seed int64) *RaftNode {
@@ -107,6 +110,7 @@ func (n *RaftNode) runTicker() {
 				continue
 			}
 			n.maybeHeartbeat()
+			n.maybeCompact()
 		}
 	}
 }
@@ -149,6 +153,24 @@ func (n *RaftNode) maybeHeartbeat() {
 	}
 }
 
+// maybeCompact snapshots the state machine and truncates the applied log prefix once
+// enough entries have accumulated, bounding log growth.
+func (n *RaftNode) maybeCompact() {
+	const threshold = 30
+	snapIdx, _ := n.log.SnapshotBoundary()
+	n.applyMu.Lock()
+	applied := n.applied
+	n.applyMu.Unlock()
+	if applied <= snapIdx || applied-snapIdx <= threshold {
+		return
+	}
+	term := n.log.TermAt(applied)
+	if term == 0 {
+		return
+	}
+	n.log.Compact(applied, term)
+}
+
 func (n *RaftNode) sendAppend(peer string) {
 	n.rmu.Lock()
 	if n.role != roleLeader {
@@ -163,6 +185,13 @@ func (n *RaftNode) sendAppend(peer string) {
 	prevIndex := ni - 1
 	n.rmu.Unlock()
 
+	// If the follower needs an entry we've already compacted, ship a snapshot instead.
+	snapIdx, _ := n.log.SnapshotBoundary()
+	if prevIndex < snapIdx {
+		n.sendSnapshot(peer, term)
+		return
+	}
+
 	prevTerm := n.log.TermAt(prevIndex)
 	entries := n.log.GetFrom(ni)
 	commit := n.log.CommitIndex()
@@ -170,6 +199,52 @@ func (n *RaftNode) sendAppend(peer string) {
 		Type: transport.MsgAppendEntries, SenderID: n.id, TargetID: peer,
 		Term: term, PrevLogIndex: prevIndex, PrevLogTerm: prevTerm,
 		Entries: entries, LeaderCommit: commit,
+	})
+}
+
+// sendSnapshot streams the leader's compacted state to a lagging follower.
+func (n *RaftNode) sendSnapshot(peer string, term uint64) {
+	snapIdx, snapTerm := n.log.SnapshotBoundary()
+	n.fabric.Send(transport.Message{
+		Type: transport.MsgInstallSnap, SenderID: n.id, TargetID: peer,
+		Term: term, PrevLogIndex: snapIdx, PrevLogTerm: snapTerm,
+		Snapshot: n.store.SnapshotBytes(),
+	})
+}
+
+func (n *RaftNode) handleInstallSnap(msg transport.Message) {
+	n.rmu.Lock()
+	if msg.Term < n.currentTerm {
+		term := n.currentTerm
+		n.rmu.Unlock()
+		n.fabric.Send(transport.Message{Type: transport.MsgAppendAck, SenderID: n.id, TargetID: msg.SenderID, Term: term, Success: false})
+		return
+	}
+	if msg.Term > n.currentTerm {
+		n.stepDownLocked(msg.Term)
+	}
+	n.role = roleFollower
+	if n.raftLeader != msg.SenderID {
+		n.raftLeader = msg.SenderID
+		n.setRole(RoleFollower)
+	}
+	n.touch()
+	term := n.currentTerm
+	n.rmu.Unlock()
+
+	snapIdx, snapTerm := msg.PrevLogIndex, msg.PrevLogTerm
+	if cur, _ := n.log.SnapshotBoundary(); snapIdx > cur {
+		_ = n.store.RestoreSnapshot(msg.Snapshot)
+		n.log.InstallSnapshot(snapIdx, snapTerm)
+		n.applyMu.Lock()
+		if n.applied < snapIdx {
+			n.applied = snapIdx
+		}
+		n.applyMu.Unlock()
+	}
+	n.fabric.Send(transport.Message{
+		Type: transport.MsgAppendAck, SenderID: n.id, TargetID: msg.SenderID,
+		Term: term, Success: true, ConflictIndex: n.log.LastIndex(),
 	})
 }
 
@@ -187,6 +262,8 @@ func (n *RaftNode) HandleMessage(raw interface{}) {
 		n.handleAppendEntries(msg)
 	case transport.MsgAppendAck:
 		n.handleAppendAck(msg)
+	case transport.MsgInstallSnap:
+		n.handleInstallSnap(msg)
 	}
 }
 
@@ -344,6 +421,8 @@ func (n *RaftNode) advanceCommitLocked() {
 
 // applyCommitted applies newly-committed log entries to the store.
 func (n *RaftNode) applyCommitted(upto uint64) {
+	n.applyMu.Lock()
+	defer n.applyMu.Unlock()
 	for i := n.applied + 1; i <= upto; i++ {
 		e, ok := n.log.Get(i)
 		if !ok {
