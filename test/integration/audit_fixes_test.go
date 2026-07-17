@@ -722,3 +722,41 @@ func TestAtomicBatch_AllKeysReplicate(t *testing.T) {
 	_, err = orch.WriteBatchAtomic(ll.ID, "", pairs, "c1")
 	assert.Error(t, err, "atomic batch requires single-leader")
 }
+
+// §1: manual conflict mode parks concurrent conflicts for a human, and resolving one
+// converges the cluster to the chosen value.
+func TestManualConflict_ParkAndResolve(t *testing.T) {
+	bus := events.NewEventBus(1000)
+	orch := simulation.NewOrchestrator(bus)
+	cluster, err := orch.CreateCluster(simulation.ClusterConfig{
+		Strategy: node.StrategyMultiLeader, NodeCount: 2, ConflictResolver: "manual",
+	})
+	require.NoError(t, err)
+	defer orch.DeleteCluster(cluster.ID)
+
+	n0, n1 := cluster.NodeIDs[0], cluster.NodeIDs[1]
+	pid, err := orch.InjectPartition(cluster.ID, []string{n0}, []string{n1})
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+	_, err = orch.Write(cluster.ID, n0, "k", []byte("from-0"), "c0")
+	require.NoError(t, err)
+	_, err = orch.Write(cluster.ID, n1, "k", []byte("from-1"), "c1")
+	require.NoError(t, err)
+	require.NoError(t, orch.HealPartition(cluster.ID, pid))
+	time.Sleep(1200 * time.Millisecond) // anti-entropy detects + parks the conflict
+
+	conflicts, err := orch.ListConflicts(cluster.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, conflicts, "manual mode must park the concurrent conflict instead of auto-resolving")
+
+	// Human resolves on n0, choosing the remote value.
+	require.NoError(t, orch.ResolveConflict(cluster.ID, n0, "k", "remote"))
+	time.Sleep(1200 * time.Millisecond) // resolution replicates + converges
+
+	for _, id := range []string{n0, n1} {
+		nn, _ := cluster.GetNode(id)
+		e, present := nn.GetStore().Get("k")
+		require.True(t, present)
+		assert.Equal(t, []byte("from-1"), e.Value, "both nodes converge to the resolved (remote) value")
+	}
+}
