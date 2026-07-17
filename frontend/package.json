@@ -1,0 +1,20 @@
+{
+  "name": "replication-strategies-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "bff": "bun run server/bff.ts",
+    "dev": "bun run server/bff.ts"
+  },
+  "dependencies": {
+    "elysia": "latest",
+    "@elysiajs/cors": "latest",
+    "d3": "^7.9.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/d3": "^7.4.3",
+    "bun-types": "latest",
+    "typescript": "^5.0.0"
+  }
+}
