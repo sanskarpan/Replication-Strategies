@@ -75,17 +75,9 @@ func (r *CRDTResolver) Type() ResolverType {
 }
 
 func (r *CRDTResolver) Resolve(c *Conflict) *Resolution {
-	// Only merge as a GCounter when BOTH values explicitly declare crdt_type=gcounter.
-	// Inferring CRDT-ness from payload shape would silently corrupt ordinary JSON.
-	var localGC, remoteGC GCounter
-	localErr := json.Unmarshal(c.Local.Value, &localGC)
-	remoteErr := json.Unmarshal(c.Remote.Value, &remoteGC)
-
-	if localErr == nil && remoteErr == nil &&
-		localGC.Type == GCounterType && remoteGC.Type == GCounterType &&
-		localGC.Counts != nil && remoteGC.Counts != nil {
-		merged := localGC.Merge(&remoteGC)
-		mergedBytes, _ := json.Marshal(merged)
+	// Dispatch on the explicit crdt_type tag (only when BOTH values agree on a known
+	// type). Inferring CRDT-ness from payload shape would silently corrupt ordinary JSON.
+	if mergedBytes, reason, ok := mergeCRDT(c.Local.Value, c.Remote.Value); ok {
 		winner := &storage.KVEntry{
 			Key:       c.Local.Key,
 			Value:     mergedBytes,
@@ -100,7 +92,7 @@ func (r *CRDTResolver) Resolve(c *Conflict) *Resolution {
 			ConflictID:   c.ID,
 			Winner:       winner,
 			ResolverType: ResolverCRDT,
-			Reason:       "gcounter_merge",
+			Reason:       reason,
 			ResolvedAt:   time.Now(),
 		}
 	}
@@ -124,6 +116,49 @@ func (r *CRDTResolver) Resolve(c *Conflict) *Resolution {
 		Reason:       reason,
 		ResolvedAt:   time.Now(),
 	}
+}
+
+// mergeCRDT merges two values as a CRDT when both carry the same known crdt_type tag.
+// Returns the merged JSON, a reason string, and ok=false when they are not a matching CRDT.
+func mergeCRDT(localVal, remoteVal []byte) ([]byte, string, bool) {
+	var lt, rt crdtTag
+	if json.Unmarshal(localVal, &lt) != nil || json.Unmarshal(remoteVal, &rt) != nil {
+		return nil, "", false
+	}
+	if lt.Type == "" || lt.Type != rt.Type {
+		return nil, "", false
+	}
+	switch lt.Type {
+	case GCounterType:
+		var a, b GCounter
+		if json.Unmarshal(localVal, &a) != nil || json.Unmarshal(remoteVal, &b) != nil || a.Counts == nil || b.Counts == nil {
+			return nil, "", false
+		}
+		out, _ := json.Marshal(a.Merge(&b))
+		return out, "gcounter_merge", true
+	case PNCounterType:
+		var a, b PNCounter
+		if json.Unmarshal(localVal, &a) != nil || json.Unmarshal(remoteVal, &b) != nil {
+			return nil, "", false
+		}
+		out, _ := json.Marshal(a.Merge(&b))
+		return out, "pncounter_merge", true
+	case ORSetType:
+		var a, b ORSet
+		if json.Unmarshal(localVal, &a) != nil || json.Unmarshal(remoteVal, &b) != nil {
+			return nil, "", false
+		}
+		out, _ := json.Marshal(a.Merge(&b))
+		return out, "orset_merge", true
+	case LWWMapType:
+		var a, b LWWMap
+		if json.Unmarshal(localVal, &a) != nil || json.Unmarshal(remoteVal, &b) != nil {
+			return nil, "", false
+		}
+		out, _ := json.Marshal(a.Merge(&b))
+		return out, "lwwmap_merge", true
+	}
+	return nil, "", false
 }
 
 func max64(a, b int64) int64 {
