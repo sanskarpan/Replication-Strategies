@@ -99,6 +99,7 @@ export interface ClusterState {
   metrics: ClusterMetrics;
   created: string;
   partitions: Record<string, Partition>;
+  dropped_messages?: number;
 }
 
 export interface SimEvent {

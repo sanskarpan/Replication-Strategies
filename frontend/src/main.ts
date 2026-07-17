@@ -494,6 +494,14 @@ function avgLatency(samples: number[]): string {
   return avg < 1 ? "<1ms" : `${avg.toFixed(1)}ms`;
 }
 
+function pctl(samples: number[], p: number): string {
+  if (!samples || samples.length === 0) return "—";
+  const s = [...samples].sort((a, b) => a - b);
+  const rank = Math.max(0, Math.ceil((p / 100) * s.length) - 1);
+  const v = s[Math.min(rank, s.length - 1)];
+  return v < 1 ? "<1ms" : `${v.toFixed(1)}ms`;
+}
+
 function renderMetrics(cluster: ClusterState) {
   const el = document.getElementById("metric-cards")!;
   const m = cluster.metrics;
@@ -522,6 +530,14 @@ function renderMetrics(cluster: ClusterState) {
     <div class="metric-card">
       <div class="metric-value">${avgLatency(allReadLat)}</div>
       <div class="metric-label">Avg Read Lat</div>
+    </div>
+    <div class="metric-card" title="99th-percentile write latency (tail)">
+      <div class="metric-value">${pctl(allWriteLat, 99)}</div>
+      <div class="metric-label">p99 Write Lat</div>
+    </div>
+    <div class="metric-card" title="Messages dropped due to back-pressure (full queues)">
+      <div class="metric-value">${cluster.dropped_messages ?? 0}</div>
+      <div class="metric-label">Dropped</div>
     </div>
     <div class="metric-card">
       <div class="metric-value">${cluster.node_ids.length}</div>
