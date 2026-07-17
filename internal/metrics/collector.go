@@ -1,9 +1,28 @@
 package metrics
 
 import (
+	"math"
+	"sort"
 	"sync"
 	"time"
 )
+
+// percentile returns the p-th percentile (nearest-rank) of the samples; 0 if empty.
+func percentile(samples []float64, p float64) float64 {
+	if len(samples) == 0 {
+		return 0
+	}
+	s := append([]float64(nil), samples...)
+	sort.Float64s(s)
+	rank := int(math.Ceil(p/100*float64(len(s)))) - 1
+	if rank < 0 {
+		rank = 0
+	}
+	if rank >= len(s) {
+		rank = len(s) - 1
+	}
+	return s[rank]
+}
 
 type LagSample struct {
 	FollowerID string    `json:"follower_id"`
@@ -24,6 +43,13 @@ type NodeMetrics struct {
 	LastUpdated    time.Time `json:"last_updated"`
 	IsLeader       bool      `json:"is_leader"`
 	IsOnline       bool      `json:"is_online"`
+	// Latency percentiles (populated by Snapshot; averages hide tail behavior).
+	WriteP50 float64 `json:"write_p50"`
+	WriteP95 float64 `json:"write_p95"`
+	WriteP99 float64 `json:"write_p99"`
+	ReadP50  float64 `json:"read_p50"`
+	ReadP95  float64 `json:"read_p95"`
+	ReadP99  float64 `json:"read_p99"`
 }
 
 func NewNodeMetrics(id string) *NodeMetrics {
@@ -134,6 +160,12 @@ func (m *NodeMetrics) Snapshot() NodeMetrics {
 		LastUpdated:    m.LastUpdated,
 		IsLeader:       m.IsLeader,
 		IsOnline:       m.IsOnline,
+		WriteP50:       percentile(wl, 50),
+		WriteP95:       percentile(wl, 95),
+		WriteP99:       percentile(wl, 99),
+		ReadP50:        percentile(rl, 50),
+		ReadP95:        percentile(rl, 95),
+		ReadP99:        percentile(rl, 99),
 	}
 }
 
