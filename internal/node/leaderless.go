@@ -193,6 +193,7 @@ func (n *LeaderlessNode) HandleMessage(raw interface{}) {
 }
 
 func (n *LeaderlessNode) applyWrite(entry *storage.KVEntry) {
+	n.HLCUpdate(entry.Timestamp) // merge remote clock to preserve causal order under skew
 	n.applyMu.Lock()
 	defer n.applyMu.Unlock()
 	existing, ok := n.store.GetRaw(entry.Key)
@@ -228,7 +229,7 @@ func (n *LeaderlessNode) Write(key string, value []byte, clientID string) (*stor
 		Key:       key,
 		Value:     value,
 		VClock:    vc,
-		Timestamp: time.Now().UnixNano(),
+		Timestamp: n.HLCNow(),
 		NodeID:    n.id,
 	}
 	return n.coordinate(kvEntry)
@@ -244,7 +245,7 @@ func (n *LeaderlessNode) Delete(key string, clientID string) error {
 	tomb := &storage.KVEntry{
 		Key:       key,
 		VClock:    vc,
-		Timestamp: time.Now().UnixNano(),
+		Timestamp: n.HLCNow(),
 		NodeID:    n.id,
 		Tombstone: true,
 	}

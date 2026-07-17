@@ -174,7 +174,7 @@ func (n *SingleLeaderNode) Write(key string, value []byte, clientID string) (*st
 	}
 	start := time.Now()
 
-	ts := time.Now().UnixNano()
+	ts := n.HLCNow()
 	// The leader's monotonic logical clock drives the vector clock, so successive
 	// writes strictly dominate one another — this is what makes the vector-clock-based
 	// consistency guarantees (RYW/monotonic) work across the leader and its followers.
@@ -247,7 +247,7 @@ func (n *SingleLeaderNode) Delete(key string, clientID string) error {
 	if n.isPaused() {
 		return fmt.Errorf("node %s is paused/offline", n.id)
 	}
-	ts := time.Now().UnixNano()
+	ts := n.HLCNow()
 	n.mu.Lock()
 	n.clock++
 	vc := storage.VectorClock{n.id: n.clock}
