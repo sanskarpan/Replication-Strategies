@@ -20,7 +20,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *simulation.Orchestrator) {
 	t.Helper()
 	bus := events.NewEventBus(200)
 	orch := simulation.NewOrchestrator(bus)
-	srv := NewServer(orch, bus)
+	srv := NewServer(orch, bus, nil)
 	ts := httptest.NewServer(srv.Router())
 	t.Cleanup(ts.Close)
 	return ts, orch
@@ -141,4 +141,66 @@ func TestGateway_ConfigPatchRejectsNonSingleLeader(t *testing.T) {
 	code, body := doJSON(t, "PATCH", ts.URL+"/api/v1/clusters/"+cid+"/config", `{"replication_mode":"sync"}`)
 	assert.Equal(t, http.StatusBadRequest, code)
 	assert.Contains(t, body, "single_leader")
+}
+
+// §0.1: the configured CORS allow-list must be honored (echo allowed origins, reject others).
+func TestGateway_CORS_AllowList(t *testing.T) {
+	bus := events.NewEventBus(50)
+	orch := simulation.NewOrchestrator(bus)
+	srv := NewServer(orch, bus, []string{"http://localhost:3001"})
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	get := func(origin string) string {
+		req, _ := http.NewRequest("GET", ts.URL+"/api/v1/clusters", nil)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		return resp.Header.Get("Access-Control-Allow-Origin")
+	}
+	assert.Equal(t, "http://localhost:3001", get("http://localhost:3001"), "allowed origin echoed")
+	assert.Equal(t, "", get("http://evil.example"), "disallowed origin gets no ACAO")
+
+	// nil list => permissive default
+	srv2 := NewServer(orch, bus, nil)
+	ts2 := httptest.NewServer(srv2.Router())
+	defer ts2.Close()
+	req, _ := http.NewRequest("GET", ts2.URL+"/api/v1/clusters", nil)
+	req.Header.Set("Origin", "http://anything")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+}
+
+// §0.5: the consistency demos must show REAL violations against a lagging replica,
+// not a hardcoded success — and must work back-to-back on the same cluster.
+func TestGateway_ConsistencyDemos_ShowViolations(t *testing.T) {
+	ts, _ := newTestServer(t)
+	cid := createCluster(t, ts.URL, `{"strategy":"single_leader","node_count":3,"replication_mode":"async"}`)
+
+	// Read-your-writes: reading the client's own write from a lagging replica fails.
+	code, body := doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/demo/read-your-writes", "")
+	require.Equal(t, http.StatusOK, code, body)
+	var ryw map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &ryw))
+	assert.Equal(t, false, ryw["consistent"], "RYW must be violated on a lagging replica")
+	assert.Contains(t, ryw["explanation"], "VIOLATED")
+
+	// Monotonic reads: the second read goes backward (v2 then v1).
+	code, body = doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/demo/monotonic-reads", "")
+	require.Equal(t, http.StatusOK, code, body)
+	var mono map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &mono))
+	assert.Equal(t, false, mono["monotonic"], "monotonic read must be violated on a lagging replica")
+
+	// Consistent prefix reports the actual observed value (not hardcoded).
+	code, body = doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/demo/consistent-prefix", "")
+	require.Equal(t, http.StatusOK, code, body)
+	var pfx map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &pfx))
+	assert.NotNil(t, pfx["observed"])
 }
