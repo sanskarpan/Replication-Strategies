@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Replication Strategies</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div id="app">
+  <!-- Panel 1: Topology -->
+  <div class="panel" id="topology-panel">
+    <div class="panel-header">
+      <span>Topology</span>
+      <span id="strategy-badge" style="font-size:10px;color:var(--accent)">no cluster</span>
+    </div>
+    <div class="panel-body" id="topology-body"></div>
+  </div>
+
+  <!-- Panel 2: Lag Timeline -->
+  <div class="panel" id="lag-panel">
+    <div class="panel-header">
+      <span>Replication Lag</span>
+      <div class="lag-legend" id="lag-legend"></div>
+    </div>
+    <div class="panel-body" id="lag-body"></div>
+  </div>
+
+  <!-- Panel 3: Quorum Visualizer -->
+  <div class="panel" id="quorum-panel">
+    <div class="panel-header">
+      <span>Quorum (W+R&gt;N)</span>
+    </div>
+    <div class="panel-body" id="quorum-body">
+      <div class="quorum-venn" id="quorum-content"></div>
+    </div>
+  </div>
+
+  <!-- Panel 4: Conflict Log -->
+  <div class="panel" id="conflicts-panel">
+    <div class="panel-header">
+      <span>Conflict Log</span>
+      <span id="conflict-count" style="color:var(--danger)">0 conflicts</span>
+    </div>
+    <div class="panel-body" id="conflicts-body"></div>
+  </div>
+
+  <!-- Panel 5: Consistency Demos -->
+  <div class="panel" id="consistency-panel">
+    <div class="panel-header">Consistency Guarantees</div>
+    <div class="panel-body" id="consistency-body"></div>
+  </div>
+
+  <!-- Panel 6: Events -->
+  <div class="panel" id="events-panel">
+    <div class="panel-header">
+      <span>Event Stream</span>
+      <button class="btn btn-sm" id="clear-events-btn">Clear</button>
+    </div>
+    <div class="panel-body">
+      <ul class="event-log" id="event-log"></ul>
+    </div>
+  </div>
+
+  <!-- Panel 7: Control -->
+  <div class="panel" id="control-panel">
+    <div class="panel-header">
+      <span>Control</span>
+      <div class="metric-cards" id="metric-cards"></div>
+    </div>
+    <div class="panel-body" id="control-body"></div>
+  </div>
+</div>
+<script type="module" src="/main.js"></script>
+</body>
+</html>
