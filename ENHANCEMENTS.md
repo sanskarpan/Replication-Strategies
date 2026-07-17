@@ -6,6 +6,22 @@ work for the Replication-Strategies simulator, produced from a four-track deep a
 
 Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL** 1–2 weeks.
 
+## Progress
+
+- ✅ **§0 — all five fixes** (PR #94): CORS config wired, deps pinned, BFF dev bundle
+  invalidation, gofmt normalized, consistency demos show real violations.
+- ✅ **§1 — expanded CRDTs** (PR #95): PN-Counter, OR-Set, LWW-Map.
+- ✅ **§1 — latency percentiles + back-pressure visibility** (PR #96): p50/p95/p99 +
+  `dropped_messages`.
+- ✅ **§1 — convergence checker** (PR #97): `GET /clusters/{id}/convergence`.
+- ⏳ **§1 remaining (next wave):** HLC + clock-skew, consistent hashing + preference lists,
+  phi-accrual detector, region-aware quorums, atomic multi-key batches, manual conflict/siblings.
+- ⏳ **XL items (dedicated waves):** real Raft election, log matching + snapshots, Paxos,
+  deterministic simulation, SWIM gossip, MVCC, 2PC, Merkle anti-entropy.
+
+Each shipped item is implemented with tests, verified `-race` clean, and confirmed by the
+Playwright browser E2E (19/19).
+
 ---
 
 ## 0. Bugs / drift surfaced during this audit (fix first — cheap)
