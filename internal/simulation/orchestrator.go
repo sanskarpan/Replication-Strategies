@@ -176,6 +176,11 @@ func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
 			cancel()
 			return nil, err
 		}
+	case node.StrategyRaft:
+		if err := o.createRaftCluster(cluster, cfg); err != nil {
+			cancel()
+			return nil, err
+		}
 	default:
 		cancel()
 		return nil, fmt.Errorf("unknown strategy: %s", cfg.Strategy)
@@ -244,6 +249,56 @@ func (o *Orchestrator) createSingleLeaderCluster(cluster *Cluster, cfg ClusterCo
 	}
 
 	return nil
+}
+
+func (o *Orchestrator) createRaftCluster(cluster *Cluster, cfg ClusterConfig) error {
+	nodeIDs := make([]string, cfg.NodeCount)
+	for i := 0; i < cfg.NodeCount; i++ {
+		nodeIDs[i] = fmt.Sprintf("node-%s-%d", cluster.ID[:8], i+1)
+	}
+	for i, id := range nodeIDs {
+		// Distinct seeds so election timeouts differ (avoids perpetual split votes).
+		n := node.NewRaftNode(id, cluster.ID, cluster.Fabric, o.bus, int64(i+1)*7919)
+		for j, peerID := range nodeIDs {
+			if j != i {
+				n.AddPeer(peerID)
+			}
+		}
+		cluster.Nodes[id] = n
+		cluster.NodeIDs = append(cluster.NodeIDs, id)
+		cluster.Metrics.AddNode(n.GetMetrics())
+	}
+	return nil
+}
+
+// raftLeaderID returns the current elected Raft leader's ID, or "" if none yet.
+func (o *Orchestrator) raftLeaderID(c *Cluster) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, n := range c.Nodes {
+		rn, ok := n.(*node.RaftNode)
+		if !ok {
+			continue
+		}
+		// Only ONLINE leaders count: a paused old leader still internally thinks it
+		// leads until it resumes and steps down, so it must not be a write target.
+		if _, isLeader := rn.RaftLeader(); isLeader && rn.GetState().State == node.StateOnline {
+			return rn.ID()
+		}
+	}
+	return ""
+}
+
+// waitForRaftLeader resolves the current leader, briefly waiting through an election.
+func (o *Orchestrator) waitForRaftLeader(c *Cluster) string {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if id := o.raftLeaderID(c); id != "" {
+			return id
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return ""
 }
 
 func (o *Orchestrator) createMultiLeaderCluster(cluster *Cluster, cfg ClusterConfig) error {
@@ -603,6 +658,9 @@ func (o *Orchestrator) Write(clusterID, nodeID, key string, value []byte, client
 	if err != nil {
 		return nil, err
 	}
+	if nodeID == "" && c.Config.Strategy == node.StrategyRaft {
+		nodeID = o.waitForRaftLeader(c)
+	}
 	c.mu.RLock()
 	var targetNode node.Node
 	if nodeID != "" {
@@ -662,6 +720,9 @@ func (o *Orchestrator) Delete(clusterID, nodeID, key, clientID string) error {
 	if err != nil {
 		return err
 	}
+	if nodeID == "" && c.Config.Strategy == node.StrategyRaft {
+		nodeID = o.waitForRaftLeader(c)
+	}
 	c.mu.RLock()
 	var targetNode node.Node
 	if nodeID != "" {
@@ -688,6 +749,9 @@ func (o *Orchestrator) Read(clusterID, nodeID, key, clientID string) (*ReadResul
 	c, err := o.GetCluster(clusterID)
 	if err != nil {
 		return nil, err
+	}
+	if nodeID == "" && c.Config.Strategy == node.StrategyRaft {
+		nodeID = o.waitForRaftLeader(c)
 	}
 	c.mu.RLock()
 	var targetNode node.Node
