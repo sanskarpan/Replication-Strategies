@@ -8,6 +8,12 @@ import (
 	"replication-strategies/internal/storage"
 )
 
+// KV is a single key/value pair used in atomic multi-key batches.
+type KV struct {
+	Key   string
+	Value []byte
+}
+
 type ReplicationStrategy string
 
 const (

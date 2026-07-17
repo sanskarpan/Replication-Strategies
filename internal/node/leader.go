@@ -168,6 +168,50 @@ func (n *SingleLeaderNode) HandleMessage(raw interface{}) {
 	}
 }
 
+// WriteBatch atomically writes multiple keys as a single replicated unit: all entries
+// go out in ONE AppendEntries message, so followers apply all-or-none (a dropped batch
+// applies nothing and is recovered whole by catch-up). Honors the replication mode.
+func (n *SingleLeaderNode) WriteBatch(pairs []KV, clientID string) ([]*storage.KVEntry, error) {
+	if n.isPaused() {
+		return nil, fmt.Errorf("node %s is paused/offline", n.id)
+	}
+	if len(pairs) == 0 {
+		return nil, fmt.Errorf("empty batch")
+	}
+	entries := make([]storage.LogEntry, 0, len(pairs))
+	kvs := make([]*storage.KVEntry, 0, len(pairs))
+	var lastIdx uint64
+	for _, p := range pairs {
+		ts := n.HLCNow()
+		n.mu.Lock()
+		n.clock++
+		vc := storage.VectorClock{n.id: n.clock}
+		n.mu.Unlock()
+		entry := storage.LogEntry{Key: p.Key, Value: p.Value, Op: storage.OpSet, Timestamp: ts, OriginID: n.id, VClock: vc}
+		idx := n.log.Append(entry)
+		entry.Index = idx
+		lastIdx = idx
+		n.log.SetCommitIndex(idx)
+		kv := &storage.KVEntry{Key: p.Key, Value: p.Value, VClock: vc, Timestamp: ts, NodeID: n.id, Version: idx}
+		n.store.Set(kv)
+		n.ryw.RecordWrite(clientID, kv)
+		entries = append(entries, entry)
+		kvs = append(kvs, kv)
+	}
+	n.mu.Lock()
+	n.seqNo++
+	seqNo := n.seqNo
+	n.mu.Unlock()
+	msg := transport.Message{Type: transport.MsgAppendEntries, SeqNo: seqNo, SenderID: n.id, Entries: entries, AckIndex: lastIdx}
+	ackErr := n.awaitReplication(n.getMode(), seqNo, n.GetPeers(), msg)
+	n.metrics.RecordWrite(0)
+	n.publishEvent(events.EvtWriteReceived, map[string]interface{}{"batch": len(pairs), "atomic": true})
+	if ackErr != nil {
+		return kvs, ackErr
+	}
+	return kvs, nil
+}
+
 func (n *SingleLeaderNode) Write(key string, value []byte, clientID string) (*storage.KVEntry, error) {
 	if n.isPaused() {
 		return nil, fmt.Errorf("node %s is paused/offline", n.id)

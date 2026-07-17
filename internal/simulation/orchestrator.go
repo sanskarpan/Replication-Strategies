@@ -13,6 +13,7 @@ import (
 	"replication-strategies/internal/metrics"
 	"replication-strategies/internal/node"
 	"replication-strategies/internal/quorum"
+	"replication-strategies/internal/storage"
 	"replication-strategies/internal/transport"
 )
 
@@ -625,6 +626,32 @@ func (o *Orchestrator) Write(clusterID, nodeID, key string, value []byte, client
 	c.Metrics.IncrWrites()
 
 	return &WriteResult{Entry: entry, NodeID: targetNode.ID()}, nil
+}
+
+// WriteBatchAtomic performs an all-or-nothing multi-key write on a single-leader
+// cluster (returns an error for other strategies).
+func (o *Orchestrator) WriteBatchAtomic(clusterID, nodeID string, pairs []node.KV, clientID string) ([]*storage.KVEntry, error) {
+	c, err := o.GetCluster(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.RLock()
+	target := nodeID
+	if target == "" {
+		target = c.LeaderID
+	}
+	n := c.Nodes[target]
+	c.mu.RUnlock()
+	sl, ok := n.(*node.SingleLeaderNode)
+	if !ok {
+		return nil, fmt.Errorf("atomic batch requires a single-leader cluster")
+	}
+	entries, err := sl.WriteBatch(pairs, clientID)
+	if err != nil {
+		return entries, err
+	}
+	c.Metrics.IncrWrites()
+	return entries, nil
 }
 
 // Delete sends a delete to the specified node (or the leader if nodeID is empty).

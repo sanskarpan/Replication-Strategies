@@ -305,12 +305,31 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 type batchWriteRequest struct {
 	Entries  []writeRequest `json:"entries"`
 	ClientID string         `json:"client_id"`
+	Atomic   bool           `json:"atomic"`
 }
 
 func (s *Server) handleWriteBatch(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req batchWriteRequest
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+	// Atomic path: all-or-nothing on a single-leader cluster.
+	if req.Atomic {
+		pairs := make([]node.KV, 0, len(req.Entries))
+		var target string
+		for _, e := range req.Entries {
+			pairs = append(pairs, node.KV{Key: e.Key, Value: []byte(e.Value)})
+			if e.TargetNodeID != "" {
+				target = e.TargetNodeID
+			}
+		}
+		entries, err := s.orch.WriteBatchAtomic(id, target, pairs, req.ClientID)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"atomic": true, "entries": entries})
 		return
 	}
 	results := make([]interface{}, 0, len(req.Entries))
