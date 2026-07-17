@@ -472,6 +472,23 @@ func (o *Orchestrator) ResumeNode(clusterID, nodeID string) error {
 	return nil
 }
 
+// SetClockSkew injects a physical-clock offset (ms) on a node so LWW behavior under
+// clock skew can be demonstrated. The hybrid logical clock keeps causality intact.
+func (o *Orchestrator) SetClockSkew(clusterID, nodeID string, ms int64) error {
+	c, err := o.GetCluster(clusterID)
+	if err != nil {
+		return err
+	}
+	c.mu.RLock()
+	n, ok := c.Nodes[nodeID]
+	c.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("node %s not found", nodeID)
+	}
+	n.SetClockSkewMillis(ms)
+	return nil
+}
+
 // InjectPartition creates a network partition between two groups of nodes.
 // Returns the partition ID which can be used to heal it later.
 func (o *Orchestrator) InjectPartition(clusterID string, groupA, groupB []string) (string, error) {
