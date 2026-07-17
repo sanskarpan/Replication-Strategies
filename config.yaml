@@ -1,0 +1,22 @@
+server:
+  port: 8080
+  cors_origins:
+    - "http://localhost:3001"
+
+simulation:
+  default_lag_threshold_ms: 100
+  heartbeat_interval_ms: 50
+  max_clusters: 10
+
+defaults:
+  single_leader:
+    nodes: 4
+    replication_mode: async  # async | sync | semi-sync
+    strong_reads: false
+  multi_leader:
+    nodes: 3
+    conflict_resolver: lww   # lww | vector_clock | crdt
+  leaderless:
+    nodes: 5
+    w: 3
+    r: 3

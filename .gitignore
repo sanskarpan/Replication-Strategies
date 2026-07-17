@@ -1,0 +1,25 @@
+# Dependencies
+frontend/node_modules/
+node_modules/
+
+# Build artifacts / binaries
+/server
+/bin/
+*.exe
+*.test
+*.out
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Playwright
+frontend/playwright-report/
+frontend/test-results/
+e2e-shots/
+
+# Logs / temp
+*.log
+tmp/
