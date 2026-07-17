@@ -37,6 +37,32 @@ func (o *Orchestrator) runHeartbeats(c *Cluster) {
 	}
 }
 
+// assignRegions distributes nodes round-robin across cfg.Regions and applies
+// inter-region latency on the fabric so geo-replication tradeoffs are visible.
+func (o *Orchestrator) assignRegions(c *Cluster, cfg ClusterConfig) {
+	c.NodeRegions = make(map[string]int, len(c.NodeIDs))
+	if cfg.Regions <= 1 {
+		for _, id := range c.NodeIDs {
+			c.NodeRegions[id] = 0
+		}
+		return
+	}
+	lat := cfg.InterRegionLatencyMs
+	if lat <= 0 {
+		lat = 80
+	}
+	for i, id := range c.NodeIDs {
+		c.NodeRegions[id] = i % cfg.Regions
+	}
+	for _, a := range c.NodeIDs {
+		for _, b := range c.NodeIDs {
+			if a != b && c.NodeRegions[a] != c.NodeRegions[b] {
+				c.Fabric.SetLatency(a, b, lat)
+			}
+		}
+	}
+}
+
 // NodeSuspicion is a node's phi-accrual suspicion level.
 type NodeSuspicion struct {
 	Phi       float64 `json:"phi"`
