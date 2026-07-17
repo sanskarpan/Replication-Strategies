@@ -29,6 +29,10 @@ type MultiLeaderNode struct {
 	// Track resolved conflicts for UI
 	conflicts   []*conflict.Conflict
 	resolutions []*conflict.Resolution
+
+	// pending holds conflicts awaiting a manual human resolution (manual resolver).
+	pendingMu sync.Mutex
+	pending   map[string]*conflict.Conflict // key -> parked conflict
 }
 
 func NewMultiLeaderNode(id, clusterID string, fabric *transport.NetworkFabric, bus *events.EventBus, resolver conflict.ConflictResolver) *MultiLeaderNode {
@@ -45,6 +49,7 @@ func NewMultiLeaderNode(id, clusterID string, fabric *transport.NetworkFabric, b
 		inbox_ch:    ch,
 		conflicts:   make([]*conflict.Conflict, 0),
 		resolutions: make([]*conflict.Resolution, 0),
+		pending:     make(map[string]*conflict.Conflict),
 	}
 	return n
 }
@@ -141,8 +146,12 @@ func (n *MultiLeaderNode) receiveRemoteWrite(remote *storage.KVEntry) {
 	}
 
 	if localVC.HappensBefore(remoteVC) {
-		// Local is stale — apply remote cleanly
+		// Local is stale — apply remote cleanly. This also settles any parked conflict
+		// for the key (e.g. a peer's manual resolution arrived and now dominates).
 		n.store.Set(remote)
+		n.pendingMu.Lock()
+		delete(n.pending, remote.Key)
+		n.pendingMu.Unlock()
 		n.publishEvent(events.EvtEntryReplicated, map[string]interface{}{
 			"key":    remote.Key,
 			"origin": remote.NodeID,
@@ -150,7 +159,17 @@ func (n *MultiLeaderNode) receiveRemoteWrite(remote *storage.KVEntry) {
 		return
 	}
 
-	// Concurrent — conflict!
+	// Concurrent — conflict! In manual mode, if we've already parked a conflict for this
+	// key, don't re-count it on every anti-entropy re-broadcast.
+	if n.resolver.Type() == conflict.ResolverManual {
+		n.pendingMu.Lock()
+		_, already := n.pending[remote.Key]
+		n.pendingMu.Unlock()
+		if already {
+			return
+		}
+	}
+
 	c := &conflict.Conflict{
 		ID:         uuid.New().String(),
 		Key:        remote.Key,
@@ -175,6 +194,14 @@ func (n *MultiLeaderNode) receiveRemoteWrite(remote *storage.KVEntry) {
 		"local_vc":    local.VClock,
 		"remote_vc":   remote.VClock,
 	})
+
+	// Manual mode: park the conflict for a human to resolve (keep local value for now).
+	if n.resolver.Type() == conflict.ResolverManual {
+		n.pendingMu.Lock()
+		n.pending[remote.Key] = c
+		n.pendingMu.Unlock()
+		return
+	}
 
 	resolution := n.resolver.Resolve(c)
 	n.mu.Lock()
@@ -300,6 +327,58 @@ func (n *MultiLeaderNode) Read(key string, clientID string) (*storage.KVEntry, e
 	}
 	n.metrics.RecordRead(0)
 	return entry, nil
+}
+
+// PendingConflicts returns conflicts awaiting manual resolution.
+func (n *MultiLeaderNode) PendingConflicts() []*conflict.Conflict {
+	n.pendingMu.Lock()
+	defer n.pendingMu.Unlock()
+	out := make([]*conflict.Conflict, 0, len(n.pending))
+	for _, c := range n.pending {
+		out = append(out, c)
+	}
+	return out
+}
+
+// ResolveConflict applies the human's choice ("local"|"remote") for a parked conflict,
+// stamping a merged vector clock so the decision dominates both parents and converges
+// across peers when replicated.
+func (n *MultiLeaderNode) ResolveConflict(key, choice string) error {
+	n.pendingMu.Lock()
+	c, ok := n.pending[key]
+	if ok {
+		delete(n.pending, key)
+	}
+	n.pendingMu.Unlock()
+	if !ok {
+		return fmt.Errorf("no pending conflict for key %q on node %s", key, n.id)
+	}
+	winner := c.Local
+	if choice == "remote" {
+		winner = c.Remote
+	}
+	merged := c.Local.VClock.Clone().Merge(c.Remote.VClock).Increment(n.id)
+	resolved := *winner
+	resolved.VClock = merged
+	resolved.Timestamp = n.HLCNow()
+	resolved.NodeID = n.id
+
+	n.applyMu.Lock()
+	n.store.Set(&resolved)
+	n.applyMu.Unlock()
+
+	n.mu.Lock()
+	n.resolutions = append(n.resolutions, &conflict.Resolution{
+		ConflictID: c.ID, Winner: &resolved, ResolverType: conflict.ResolverManual,
+		Reason: "manual_" + choice, ResolvedAt: time.Now(),
+	})
+	n.mu.Unlock()
+
+	go n.fabric.Broadcast(transport.Message{Type: transport.MsgWrite, SenderID: n.id, Entry: &resolved}, n.GetPeers())
+	n.publishEvent(events.EvtConflictResolved, map[string]interface{}{
+		"key": key, "resolver": "manual", "choice": choice,
+	})
+	return nil
 }
 
 func (n *MultiLeaderNode) GetConflicts() []*conflict.Conflict {
