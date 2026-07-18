@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof" // registers /debug/pprof handlers on the default mux (guarded below)
 	"os"
 	"os/signal"
 	"syscall"
@@ -59,6 +60,17 @@ func main() {
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: srv.Router(),
+	}
+
+	// Guarded pprof: only exposed on a separate loopback port when PPROF_ADDR is set
+	// (e.g. PPROF_ADDR=localhost:6060), never on the public API surface.
+	if pprofAddr := os.Getenv("PPROF_ADDR"); pprofAddr != "" {
+		go func() {
+			slog.Info("pprof listening", "addr", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				slog.Warn("pprof server stopped", "error", err)
+			}
+		}()
 	}
 
 	go func() {
