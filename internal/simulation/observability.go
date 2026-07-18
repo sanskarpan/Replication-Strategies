@@ -101,6 +101,7 @@ func (o *Orchestrator) assignRegions(c *Cluster, cfg ClusterConfig) {
 		for _, id := range c.NodeIDs {
 			c.NodeRegions[id] = 0
 		}
+		o.pushRegions(c)
 		return
 	}
 	lat := cfg.InterRegionLatencyMs
@@ -115,6 +116,20 @@ func (o *Orchestrator) assignRegions(c *Cluster, cfg ClusterConfig) {
 			if a != b && c.NodeRegions[a] != c.NodeRegions[b] {
 				c.Fabric.SetLatency(a, b, lat)
 			}
+		}
+	}
+	o.pushRegions(c)
+}
+
+// pushRegions informs leaderless nodes of the region map so LOCAL/EACH_QUORUM works.
+func (o *Orchestrator) pushRegions(c *Cluster) {
+	names := make(map[string]string, len(c.NodeRegions))
+	for id, r := range c.NodeRegions {
+		names[id] = fmt.Sprintf("region-%d", r)
+	}
+	for _, n := range c.Nodes {
+		if ll, ok := n.(*node.LeaderlessNode); ok {
+			ll.SetRegions(names)
 		}
 	}
 }
