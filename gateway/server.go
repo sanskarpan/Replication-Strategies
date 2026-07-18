@@ -14,6 +14,7 @@ type Server struct {
 	orch        *simulation.Orchestrator
 	bus         *events.EventBus
 	corsOrigins []string // allow-list; empty or containing "*" => allow any
+	build       BuildInfo
 }
 
 // NewServer creates a new Server. corsOrigins is the allowed CORS origin list from
@@ -26,11 +27,18 @@ func NewServer(orch *simulation.Orchestrator, bus *events.EventBus, corsOrigins 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
+	r.Use(slogMiddleware) // structured (slog) access logs
 	r.Use(middleware.Recoverer)
 	// Cap request bodies at 1 MiB to prevent unbounded-memory (DoS) via large payloads.
 	r.Use(middleware.RequestSize(1 << 20))
 	r.Use(s.corsMiddleware)
+
+	// Operational endpoints (top-level, unversioned): liveness, readiness, Prometheus
+	// metrics, and build version.
+	r.Get("/healthz", s.handleHealthz)
+	r.Get("/readyz", s.handleReadyz)
+	r.Get("/metrics", s.handleMetrics)
+	r.Get("/version", s.handleVersion)
 
 	// REST API
 	r.Route("/api/v1", func(r chi.Router) {
