@@ -20,10 +20,41 @@ Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL**
 - ✅ **§1 — geo-regions + inter-region latency** (PR #103).
 - ✅ **§1 — atomic multi-key batches** (PR #104).
 - ✅ **§1 — manual conflict resolution / siblings** (PR #105).
-- ⏳ **§1 remaining:** full preference-list routing for leaderless (changes quorum semantics — deferred to a careful dedicated change).
 - ✅ **XL — real Raft consensus** (PR #107): leader election, log replication + log-matching, majority commit, automatic failover; usable as a 4th strategy.
 - ✅ **XL — Raft log compaction + snapshots**: bounded log growth via compaction, InstallSnapshot catch-up for lagging followers.
-- ⏳ **XL remaining (dedicated waves):** Paxos, deterministic simulation, SWIM gossip, MVCC, 2PC, Merkle anti-entropy.
+
+### §1 completion wave — all remaining distributed-systems features ✅
+
+Every remaining §1 item is now shipped (each with unit/integration tests, `-race` clean,
+confirmed by the 19/19 Playwright browser E2E). Nine new primitive packages were built —
+three via a parallel workflow + adversarial verification, six via a second workflow — and
+wired into the simulator:
+
+- ✅ **Preference-list routing** — leaderless writes/reads target the key's N ring replicas
+  instead of every node (replication factor N decoupled from cluster size via `quorum_n`).
+- ✅ **True sloppy quorums + hinted handoff** — the coordinator borrows healthy stand-in
+  nodes (tagged `OriginalTarget`) to meet W during a failure, handing off on recovery.
+- ✅ **Read-repair strategy options** — `async` / `sync` (blocking) / `digest` (hash-only).
+- ✅ **Region-aware quorums** — `LOCAL_QUORUM` / `EACH_QUORUM` over the geo-region map.
+- ✅ **Merkle-tree anti-entropy** (`internal/antientropy`, `POST /clusters/{id}/anti-entropy`)
+  — range-diff sync exchanging only divergent keys instead of the whole store.
+- ✅ **Linearizability checker** (`internal/checker`, `GET /clusters/{id}/linearizable`) —
+  Wing-Gong search over the recorded op history; pinpoints the violating op.
+- ✅ **Continuous invariant + convergence checker** (`GET /clusters/{id}/invariants`).
+- ✅ **Causal + bounded-staleness read levels** (`internal/consistency`).
+- ✅ **Realistic latency distributions** — per-link jitter + heavy-tail spikes in the fabric.
+- ✅ **RGA sequence CRDT** (`internal/conflict`, `crdt_type:"rga"`).
+- ✅ **2PC atomic mini-transactions** (`internal/twopc`, `GET /demos/2pc`) — blocking on a
+  coordinator crash between prepare and commit, plus recovery.
+- ✅ **MVCC snapshot reads** (`internal/mvcc`, `GET /demos/mvcc`).
+- ✅ **Tunable durability / WAL** (`internal/durability`, `GET /demos/wal`) — buffered vs
+  fsync vs group-commit with a crash that loses un-fsynced-but-acked data.
+- ✅ **SWIM gossip membership** (`internal/swim`, `GET /demos/swim`) — incarnation numbers.
+- ✅ **Paxos / Multi-Paxos** (`internal/paxos`, `GET /demos/paxos`) — once-chosen safety.
+- ✅ **Deterministic simulation seam** (`internal/simclock`, `GET /demos/detsim`) — seeded
+  virtual clock + RNG for reproducible runs (full pervasive-refactor adoption is incremental).
+- ✅ **Dynamic membership reconfiguration** (`POST /clusters/{id}/reconfigure/add-node`) — a
+  safe two-phase (joint-consensus-style) leaderless change preserving W+R>N throughout.
 
 Each shipped item is implemented with tests, verified `-race` clean, and confirmed by the
 Playwright browser E2E (19/19).
