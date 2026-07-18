@@ -1,0 +1,97 @@
+# GoReleaser v2 configuration.
+# Validate:  goreleaser check
+# Snapshot:  goreleaser release --snapshot --clean
+version: 2
+
+project_name: replsim
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: server
+    main: ./cmd/server
+    binary: server
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+  - id: replsim
+    main: ./cmd/replsim
+    binary: replsim
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    ids:
+      - server
+      - replsim
+    formats:
+      - tar.gz
+    # Use zip on Windows-style targets if ever added.
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Generate a CycloneDX SBOM per released artifact using syft.
+sboms:
+  - id: archive-sbom
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Optional: publish container images. Uncomment and adjust once a registry is set up.
+# dockers:
+#   - image_templates:
+#       - "ghcr.io/sanskarpan/replsim:{{ .Version }}-amd64"
+#     dockerfile: Dockerfile
+#     use: buildx
+#     goos: linux
+#     goarch: amd64
+#     build_flag_templates:
+#       - "--platform=linux/amd64"
+
+release:
+  draft: true
+  prerelease: auto
