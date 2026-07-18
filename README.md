@@ -9,10 +9,20 @@ availability, and latency.
   follower lag, and catch-up after dropped entries.
 - **Multi-leader** — every node accepts writes; conflicts detected via vector clocks and
   resolved by LWW, vector-clock, or CRDT resolvers; anti-entropy reconciles after a heal.
-- **Leaderless (Dynamo-style)** — tunable `N/W/R` quorums, read repair, hinted handoff,
-  and the `W + R > N` overlap guarantee.
+- **Leaderless (Dynamo-style)** — tunable `N/W/R` quorums, consistent-hash **preference-list
+  routing**, **sloppy quorums** with hinted handoff, **async/sync/digest read repair**,
+  **region-aware quorums** (`LOCAL_QUORUM`/`EACH_QUORUM`), and the `W + R > N` guarantee.
 - **Raft (consensus)** — real leader election, log replication with log-matching,
   majority commit, automatic failover, and log compaction + snapshots.
+
+**Correctness checkers & anti-entropy:** a Porcupine-style **linearizability checker**
+(`/linearizable`), a continuous **invariant + convergence checker** (`/invariants`), and
+**Merkle-tree anti-entropy** (`/anti-entropy`) that syncs only the divergent keys.
+
+**Interactive primitive demos** (`/api/v1/demos/…`): **2PC** (with a coordinator crash),
+**MVCC** snapshot reads, tunable **WAL durability** (buffered/fsync/group-commit), **SWIM**
+gossip membership, **Paxos**/Multi-Paxos, and a seeded **deterministic-simulation** clock.
+Plus safe two-phase **membership reconfiguration** (`/reconfigure/add-node`).
 
 ## Architecture
 
@@ -57,13 +67,16 @@ cd frontend && node e2e-run.mjs   # Playwright browser E2E (needs backend + BFF 
 | Path | What |
 |------|------|
 | `internal/storage` | KV store, vector clocks |
-| `internal/transport` | network fabric (latency/drop/partition), messages |
-| `internal/node` | single-leader / multi-leader / leaderless nodes |
-| `internal/conflict` | LWW / vector-clock / CRDT resolvers |
+| `internal/transport` | network fabric (latency/jitter/drop/partition), messages |
+| `internal/node` | single-leader / multi-leader / leaderless / raft nodes |
+| `internal/conflict` | LWW / vector-clock / CRDT resolvers (incl. RGA) |
 | `internal/quorum` | N/W/R math and presets |
-| `internal/consistency` | read-your-writes, monotonic reads, consistent prefix |
-| `internal/simulation` | cluster orchestrator + scenarios |
-| `internal/{events,metrics}` | event bus, metrics |
+| `internal/consistency` | read-your-writes, monotonic, causal, bounded-staleness |
+| `internal/hashring` | consistent hashing + preference lists |
+| `internal/{checker,antientropy}` | linearizability checker, Merkle anti-entropy |
+| `internal/{twopc,mvcc,durability,swim,paxos,simclock}` | 2PC, MVCC, WAL, SWIM, Paxos, deterministic clock |
+| `internal/simulation` | cluster orchestrator + scenarios + checkers + demos |
+| `internal/{events,metrics,clock,failure}` | event bus, metrics, HLC, phi-accrual |
 | `gateway` | REST + WebSocket API |
 | `frontend` | Bun BFF + D3 visualization |
 

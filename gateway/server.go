@@ -51,6 +51,11 @@ func (s *Server) Router() http.Handler {
 		r.Get("/clusters/{id}/conflicts", s.handleListConflicts)
 		r.Post("/clusters/{id}/conflicts/resolve", s.handleResolveConflict)
 		r.Patch("/clusters/{id}/config", s.handleClusterConfig)
+		// Correctness checkers + anti-entropy
+		r.Get("/clusters/{id}/linearizable", s.handleLinearizable)
+		r.Get("/clusters/{id}/invariants", s.handleInvariants)
+		r.Post("/clusters/{id}/anti-entropy", s.handleAntiEntropy)
+		r.Post("/clusters/{id}/reconfigure/add-node", s.handleSafeAddNode)
 
 		// Writes & reads
 		r.Post("/clusters/{id}/write", s.handleWrite)
@@ -82,6 +87,14 @@ func (s *Server) Router() http.Handler {
 		// Scenarios
 		r.Get("/scenarios", s.handleListScenarios)
 		r.Post("/scenarios/{name}/run", s.handleRunScenario)
+
+		// Standalone primitive demos (2PC, MVCC, WAL, SWIM, Paxos, deterministic sim)
+		r.Get("/demos/2pc", s.handleDemoTwoPC)
+		r.Get("/demos/mvcc", s.handleDemoMVCC)
+		r.Get("/demos/wal", s.handleDemoWAL)
+		r.Get("/demos/swim", s.handleDemoSWIM)
+		r.Get("/demos/paxos", s.handleDemoPaxos)
+		r.Get("/demos/detsim", s.handleDemoDetSim)
 	})
 
 	// WebSocket event stream

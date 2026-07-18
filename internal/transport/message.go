@@ -60,4 +60,8 @@ type Message struct {
 	VoteGranted   bool   `json:"vote_granted,omitempty"`
 	// Raft InstallSnapshot: PrevLogIndex/PrevLogTerm carry the snapshot boundary.
 	Snapshot []byte `json:"snapshot,omitempty"`
+	// Digest reads: request only a value hash + metadata (no value payload) to save
+	// bandwidth; the value is fetched only from the winning replica on a mismatch.
+	Digest bool   `json:"digest,omitempty"`
+	Hash   string `json:"hash,omitempty"`
 }
