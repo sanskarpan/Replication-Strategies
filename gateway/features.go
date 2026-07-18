@@ -43,6 +43,70 @@ func (s *Server) handleAntiEntropy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rep)
 }
 
+// handleGlossary returns the DDIA-mapped glossary of distributed-systems terms.
+func (s *Server) handleGlossary(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, simulation.ListGlossary())
+}
+
+// handleLessons returns the guided predict-then-reveal lessons.
+func (s *Server) handleLessons(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, simulation.ListLessons())
+}
+
+// handleListPresets returns the real-system configuration presets.
+func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, simulation.ListPresets())
+}
+
+// handleCreateFromPreset provisions a cluster from a named real-system preset.
+func (s *Server) handleCreateFromPreset(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	cluster, err := s.orch.CreateFromPreset(name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, cluster.GetState())
+}
+
+// handleCAP classifies a cluster on the CAP/PACELC spectrum.
+func (s *Server) handleCAP(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c, err := s.orch.GetCluster(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, simulation.ClassifyCAP(c.Config))
+}
+
+// handleChallenge grades a cluster against a target SLA (Challenge Mode).
+func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var sla simulation.SLA
+	if !decodeJSON(w, r, &sla) {
+		return
+	}
+	grade, err := s.orch.GradeChallenge(id, sla)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, grade)
+}
+
+// handleScenarioResult returns the narrated timeline + expected-vs-actual verdict for a
+// cluster's most recent scenario run.
+func (s *Server) handleScenarioResult(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	res, ok := s.orch.ScenarioResult(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "no scenario has been run for this cluster")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // handleSafeAddNode performs a safe two-phase leaderless membership change (no
 // quorum-overlap gap) and reports the transition.
 func (s *Server) handleSafeAddNode(w http.ResponseWriter, r *http.Request) {

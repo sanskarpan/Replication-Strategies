@@ -22,6 +22,9 @@ const (
 	EvtQuorumFailed     EventType = "quorum_failed"
 	EvtWriteReceived    EventType = "write_received"
 	EvtReadReceived     EventType = "read_received"
+	// Scenario engine: narrated step + expected-vs-actual verdict.
+	EvtScenarioStep    EventType = "scenario_step"
+	EvtScenarioVerdict EventType = "scenario_verdict"
 )
 
 type Event struct {

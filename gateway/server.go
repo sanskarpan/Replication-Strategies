@@ -64,6 +64,17 @@ func (s *Server) Router() http.Handler {
 		r.Get("/clusters/{id}/invariants", s.handleInvariants)
 		r.Post("/clusters/{id}/anti-entropy", s.handleAntiEntropy)
 		r.Post("/clusters/{id}/reconfigure/add-node", s.handleSafeAddNode)
+		r.Get("/clusters/{id}/scenario", s.handleScenarioResult)
+		r.Get("/clusters/{id}/cap", s.handleCAP)
+		r.Post("/clusters/{id}/challenge", s.handleChallenge)
+
+		// Real-system presets (Cassandra/DynamoDB/Postgres/etcd/Kafka)
+		r.Get("/presets", s.handleListPresets)
+		r.Post("/presets/{name}/create", s.handleCreateFromPreset)
+
+		// Learning content: DDIA-mapped glossary + guided lessons
+		r.Get("/glossary", s.handleGlossary)
+		r.Get("/lessons", s.handleLessons)
 
 		// Writes & reads
 		r.Post("/clusters/{id}/write", s.handleWrite)

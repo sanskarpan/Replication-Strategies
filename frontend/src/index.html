@@ -7,6 +7,21 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+<!-- Top bar: WS status pill + theme toggle + help -->
+<div id="topbar">
+  <span id="app-title">Replication Strategies</span>
+  <div id="topbar-right">
+    <span id="cap-dial" class="cap-dial" title="CAP posture (CP/AP) given strategy + partition state">
+      <span class="cap-dot"></span><span class="cap-text">—</span>
+    </span>
+    <span id="ws-status" class="ws-pill" data-state="connecting" title="WebSocket event stream status">
+      <span class="ws-dot"></span><span class="ws-label">connecting</span>
+    </span>
+    <button class="btn btn-sm" id="help-btn" title="Keyboard shortcuts (?)">?</button>
+    <button class="btn btn-sm" id="theme-toggle" title="Toggle light/dark theme (t)">◐ Theme</button>
+  </div>
+</div>
+
 <div id="app">
   <!-- Panel 1: Topology -->
   <div class="panel" id="topology-panel">
@@ -34,6 +49,23 @@
     <div class="panel-body" id="quorum-body">
       <div class="quorum-venn" id="quorum-content"></div>
     </div>
+  </div>
+
+  <!-- Panel 3b: Diverged-state diff view -->
+  <div class="panel" id="diff-panel">
+    <div class="panel-header">
+      <span>Divergence</span>
+      <span id="convergence-badge" class="consistency-badge strong">—</span>
+    </div>
+    <div class="panel-body" id="diff-matrix"></div>
+  </div>
+
+  <!-- Panel 3c: Latency percentiles -->
+  <div class="panel" id="latency-panel">
+    <div class="panel-header">
+      <span>Latency p50/p95/p99</span>
+    </div>
+    <div class="panel-body" id="latency-chart"></div>
   </div>
 
   <!-- Panel 4: Conflict Log -->
@@ -71,6 +103,37 @@
     <div class="panel-body" id="control-body"></div>
   </div>
 </div>
+
+<!-- Per-node inspector drawer -->
+<div id="node-inspector" class="drawer" aria-hidden="true">
+  <div class="drawer-header">
+    <span id="inspector-title">Node</span>
+    <button class="btn btn-sm" id="inspector-close" title="Close (Esc)">✕</button>
+  </div>
+  <div class="drawer-body" id="inspector-body"></div>
+</div>
+
+<!-- Non-blocking toast notifications -->
+<div id="toast-container"></div>
+
+<!-- Keyboard shortcut help overlay -->
+<div id="help-modal" class="modal-backdrop" aria-hidden="true">
+  <div class="modal">
+    <div class="modal-header">
+      <span>Keyboard Shortcuts</span>
+      <button class="btn btn-sm" id="help-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="kbd-row"><kbd>w</kbd><span>Focus the write key field</span></div>
+      <div class="kbd-row"><kbd>r</kbd><span>Read the current key</span></div>
+      <div class="kbd-row"><kbd>i</kbd><span>Inspect the first node</span></div>
+      <div class="kbd-row"><kbd>t</kbd><span>Toggle light / dark theme</span></div>
+      <div class="kbd-row"><kbd>?</kbd><span>Toggle this help</span></div>
+      <div class="kbd-row"><kbd>Esc</kbd><span>Close drawer / modal</span></div>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="/main.js"></script>
 </body>
 </html>
