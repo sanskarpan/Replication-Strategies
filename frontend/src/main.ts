@@ -1,8 +1,32 @@
 import * as d3 from "d3";
 import { api } from "./api/client";
-import type { ClusterState, SimEvent, Scenario, DemoRYWResult, DemoMonotonicResult, DemoPrefixResult } from "./api/types";
+import type { ClusterState, SimEvent, Scenario, VectorClock, NodeStoreSnapshot } from "./api/types";
 import { WSClient } from "./ws/client";
+import type { WSStatus } from "./ws/client";
 import { store } from "./store/simulation";
+
+const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+// ─── Toasts (replace alert()) ──────────────────────────────────────────────────
+type ToastKind = "info" | "error" | "success" | "warn";
+function toast(message: string, kind: ToastKind = "info", title?: string) {
+  const container = document.getElementById("toast-container");
+  if (!container) { console.warn(message); return; }
+  const el = document.createElement("div");
+  el.className = `toast ${kind === "info" ? "" : kind}`.trim();
+  el.innerHTML = title ? `<div class="toast-title">${esc(title)}</div>${esc(message)}` : esc(message);
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity 0.3s"; setTimeout(() => el.remove(), 300); }, 4000);
+}
+function esc(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+}
+// Central place to surface an operation error as a toast (used by callers that
+// previously relied on alert() / silent failure).
+function reportError(context: string, e: unknown) {
+  const msg = e instanceof Error ? e.message : String(e);
+  toast(msg, "error", context);
+}
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 const ws = new WSClient();
@@ -10,7 +34,16 @@ ws.on("*", (evt) => {
   store.handleEvent(evt);
   appendEvent(evt);
 });
+ws.onStatus(renderWSStatus);
 ws.connect();
+
+function renderWSStatus(status: WSStatus) {
+  const pill = document.getElementById("ws-status");
+  if (!pill) return;
+  pill.dataset.state = status;
+  const label = pill.querySelector(".ws-label");
+  if (label) label.textContent = status === "live" ? "live" : status;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // Go JSON-encodes []byte as base64. Decode "value" fields for display.
@@ -21,6 +54,20 @@ function displayResult(result: unknown): string {
     }
     return val;
   }, 2);
+}
+
+function decodeB64(v: string): string {
+  try { return atob(v); } catch { return v; }
+}
+
+// Render a vector clock as compact chips instead of raw JSON.
+function vcChipsHTML(vc: VectorClock | undefined): string {
+  const entries = Object.entries(vc || {}).filter(([, n]) => n > 0);
+  if (entries.length === 0) return `<span class="vc-chips empty">∅</span>`;
+  return `<span class="vc-chips">` + entries
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([id, n]) => `<span class="vc-chip"><b>${esc(id.split("-").slice(-1)[0])}</b><span>:${n}</span></span>`)
+    .join("") + `</span>`;
 }
 
 // ─── Event Log ───────────────────────────────────────────────────────────────
@@ -181,8 +228,19 @@ function renderTopology(cluster: ClusterState) {
       g.append("circle").attr("r", 20).attr("class", (d) => `node-circle ${d.role}${d.state === "paused" ? " paused" : ""}`);
       g.append("text").attr("class", "node-label").attr("dy", "0.35em");
       g.append("text").attr("class", "node-label").attr("dy", "2.2em").attr("fill", "var(--text-dim)").style("font-size", "9px");
+      // Inspect affordance: a small badge top-right of the node. Clicking it opens
+      // the inspector drawer WITHOUT toggling pause (which stays on the node body).
+      const insp = g.append("g").attr("class", "node-inspect-btn").attr("transform", "translate(15,-15)");
+      insp.append("circle").attr("r", 8).attr("fill", "var(--surface2)").attr("stroke", "var(--border)").attr("stroke-width", 1);
+      insp.append("text").attr("class", "node-label").attr("dy", "0.32em").style("font-size", "9px").style("pointer-events", "none").text("🔍");
       return g;
     });
+
+  // Inspect button opens the drawer; stopPropagation keeps pause-on-node-click intact.
+  nodeSel.select<SVGGElement>("g.node-inspect-btn").on("click", (event, d) => {
+    event.stopPropagation();
+    openInspector(cluster.id, d.id);
+  });
 
   nodeSel.select<SVGCircleElement>("circle")
     .attr("class", (d) => `node-circle ${d.role}${d.state === "paused" ? " paused" : ""}`);
@@ -208,7 +266,63 @@ function renderTopology(cluster: ClusterState) {
       .attr("x2", (d) => (d.target as TopoNode).x!)
       .attr("y2", (d) => (d.target as TopoNode).y!);
     nodeSel.attr("transform", (d) => `translate(${d.x!},${d.y!})`);
+    // Keep a live position lookup for packet animation.
+    nodePos.clear();
+    for (const n of nodes) if (n.x != null && n.y != null) nodePos.set(n.id, { x: n.x, y: n.y });
   });
+}
+
+// ─── Animated message-passing packets ──────────────────────────────────────────
+// Live node positions from the force sim, used to tween dots along links.
+const nodePos = new Map<string, { x: number; y: number }>();
+
+function packetColor(type: string): string {
+  if (type === "read_repair") return "var(--accent2)";
+  if (type === "hinted_handoff") return "var(--warn)";
+  return "var(--accent)"; // replication
+}
+
+// Animate a dot from `from` to `to`. If `dropped`, fade it out partway.
+function animatePacket(from: string, to: string, type: string, dropped = false) {
+  if (reduceMotion || !topoSvg) return;
+  const a = nodePos.get(from);
+  const b = nodePos.get(to);
+  if (!a || !b) return;
+  const layer = topoSvg.select<SVGGElement>(".nodes"); // draw above links
+  const dot = layer.append("circle")
+    .attr("class", "packet")
+    .attr("r", 4)
+    .attr("fill", packetColor(type))
+    .attr("cx", a.x).attr("cy", a.y)
+    .attr("opacity", 0.95);
+  const t = dot.transition().duration(700).ease(d3.easeLinear);
+  if (dropped) {
+    t.attr("cx", (a.x + b.x) / 2).attr("cy", (a.y + b.y) / 2).attr("opacity", 0)
+      .on("end", () => dot.remove());
+  } else {
+    t.attr("cx", b.x).attr("cy", b.y)
+      .transition().duration(120).attr("opacity", 0)
+      .on("end", () => dot.remove());
+  }
+}
+
+// Resolve source/target node ids for a replication-ish event, then animate.
+function packetForEvent(evt: SimEvent) {
+  const cluster = store.getActive();
+  if (!cluster || evt.cluster_id !== cluster.id) return;
+  const d = evt.data || {};
+  const from = (d.from as string) || (d.leader_id as string) || cluster.leader_id || evt.node_id;
+  const to = (d.to as string) || (d.follower_id as string) || (d.target as string) || (d.node_id as string);
+  const dropped = (evt.type as string) === "message_dropped" || d.dropped === true;
+  if (evt.type === "read_repair" && Array.isArray(d.stale_nodes)) {
+    for (const sn of d.stale_nodes as string[]) if (from) animatePacket(from, sn, "read_repair", dropped);
+    return;
+  }
+  if (from && to) animatePacket(from, to, evt.type, dropped);
+  else if (from) {
+    // Broadcast to all followers when target is unspecified.
+    for (const nid of cluster.node_ids) if (nid !== from) animatePacket(from, nid, evt.type, dropped);
+  }
 }
 
 // ─── Lag Timeline ─────────────────────────────────────────────────────────────
@@ -330,6 +444,11 @@ ws.on("read_repair", (evt) => {
   if (conflictsBody.children.length > 50) conflictsBody.lastChild?.remove();
 });
 
+// Animate packets for replication / repair / handoff events on the WS stream.
+for (const t of ["entry_replicated", "read_repair", "hinted_handoff"] as const) {
+  ws.on(t, (evt) => packetForEvent(evt));
+}
+
 // ─── Quorum Visualizer ────────────────────────────────────────────────────────
 function renderQuorum(cluster: ClusterState) {
   const el = document.getElementById("quorum-content")!;
@@ -367,7 +486,44 @@ function renderQuorum(cluster: ClusterState) {
     <div style="padding:0 12px;font-size:10px;color:var(--text-dim)">
       ${strong ? `W+R=${W+R} > N=${N}: guaranteed overlap of ${overlap} node(s)` : `W+R=${W+R} <= N=${N}: stale reads possible`}
     </div>
+    <div class="quorum-sliders">
+      <div class="slider-row"><span class="slider-label">N</span>
+        <input type="range" id="quorum-slider-n" min="1" max="9" value="${N}" />
+        <span class="slider-val" id="quorum-val-n">${N}</span></div>
+      <div class="slider-row"><span class="slider-label">W</span>
+        <input type="range" id="quorum-slider-w" min="1" max="9" value="${W}" />
+        <span class="slider-val" id="quorum-val-w">${W}</span></div>
+      <div class="slider-row"><span class="slider-label">R</span>
+        <input type="range" id="quorum-slider-r" min="1" max="9" value="${R}" />
+        <span class="slider-val" id="quorum-val-r">${R}</span></div>
+      <div class="quorum-verdict" id="quorum-verdict"></div>
+    </div>
   `;
+
+  // Wire the interactive sliders. Config PATCH only accepts replication_mode
+  // server-side, so these visualize live overlap + estimated stale-read probability
+  // without mutating backend state.
+  const sn = document.getElementById("quorum-slider-n") as HTMLInputElement;
+  const sw = document.getElementById("quorum-slider-w") as HTMLInputElement;
+  const sr = document.getElementById("quorum-slider-r") as HTMLInputElement;
+  const updateVerdict = () => {
+    const n = +sn.value, w = +sw.value, r = +sr.value;
+    (document.getElementById("quorum-val-n")!).textContent = String(n);
+    (document.getElementById("quorum-val-w")!).textContent = String(w);
+    (document.getElementById("quorum-val-r")!).textContent = String(r);
+    const strongNow = (w + r) > n;
+    // Simple stale-read estimate: probability a read set misses the newest write set
+    // = fraction of read placements that fall entirely outside the W most-recent
+    // replicas. Approximated as max(0, (n-w)/n)^(effective read shortfall).
+    const staleP = strongNow ? 0 : Math.max(0, (n - w) / n) * Math.max(0, (n - r + 1) / n);
+    const verdict = document.getElementById("quorum-verdict")!;
+    verdict.className = `quorum-verdict ${strongNow ? "strong" : "eventual"}`;
+    verdict.innerHTML = strongNow
+      ? `W+R=${w + r} &gt; N=${n} → strongly consistent · stale-read ≈ 0%`
+      : `W+R=${w + r} ≤ N=${n} → eventual · stale-read ≈ ${(staleP * 100).toFixed(0)}%`;
+  };
+  [sn, sw, sr].forEach((s) => s.addEventListener("input", updateVerdict));
+  updateVerdict();
 }
 
 // ─── Consistency Panel ────────────────────────────────────────────────────────
@@ -687,17 +843,22 @@ function renderControl() {
       cfg.quorum_w = parseInt((document.getElementById("quorum-w") as HTMLInputElement).value);
       cfg.quorum_r = parseInt((document.getElementById("quorum-r") as HTMLInputElement).value);
     }
-    const cluster = await api.startSimulation(cfg);
-    store.clusters.set(cluster.id, cluster);
-    store.activeClusterId = cluster.id;
-    store.notify();
-    refresh();
+    try {
+      const cluster = await api.startSimulation(cfg);
+      store.clusters.set(cluster.id, cluster);
+      store.activeClusterId = cluster.id;
+      store.notify();
+      refresh();
+      toast(`${strategy} cluster created (${nodeCount} nodes)`, "success");
+    } catch (e) {
+      reportError("Create cluster", e);
+    }
   });
 
   // Add node
   document.getElementById("add-node-btn")!.addEventListener("click", async () => {
     const cluster = store.getActive();
-    if (!cluster) return alert("No active cluster");
+    if (!cluster) return toast("No active cluster", "warn");
     await api.addNode(cluster.id);
     await store.refreshCluster(cluster.id);
     refresh();
@@ -706,7 +867,7 @@ function renderControl() {
   // Remove node
   document.getElementById("remove-node-btn")!.addEventListener("click", async () => {
     const cluster = store.getActive();
-    if (!cluster) return alert("No active cluster");
+    if (!cluster) return toast("No active cluster", "warn");
     const lastNode = cluster.node_ids[cluster.node_ids.length - 1];
     if (!lastNode) return;
     await api.removeNode(cluster.id, lastNode);
@@ -726,7 +887,7 @@ function renderControl() {
   // Write
   document.getElementById("write-btn")!.addEventListener("click", async () => {
     const cluster = store.getActive();
-    if (!cluster) return alert("No active cluster");
+    if (!cluster) return toast("No active cluster", "warn");
     const key = (document.getElementById("write-key") as HTMLInputElement).value;
     const value = (document.getElementById("write-value") as HTMLInputElement).value;
     const clientId = (document.getElementById("client-id") as HTMLInputElement).value;
@@ -743,7 +904,7 @@ function renderControl() {
   // Read
   document.getElementById("read-btn")!.addEventListener("click", async () => {
     const cluster = store.getActive();
-    if (!cluster) return alert("No active cluster");
+    if (!cluster) return toast("No active cluster", "warn");
     const key = (document.getElementById("write-key") as HTMLInputElement).value;
     const clientId = (document.getElementById("client-id") as HTMLInputElement).value;
     const rwResult = document.getElementById("rw-result")!;
@@ -758,7 +919,7 @@ function renderControl() {
   // Delete
   document.getElementById("delete-btn")!.addEventListener("click", async () => {
     const cluster = store.getActive();
-    if (!cluster) return alert("No active cluster");
+    if (!cluster) return toast("No active cluster", "warn");
     const key = (document.getElementById("write-key") as HTMLInputElement).value;
     const clientId = (document.getElementById("client-id") as HTMLInputElement).value;
     const rwResult = document.getElementById("rw-result")!;
@@ -848,6 +1009,182 @@ function renderPartitionList(clusterId: string) {
   });
 }
 
+// ─── Per-node inspector drawer ──────────────────────────────────────────────────
+let inspectorNode: { clusterId: string; nodeId: string } | null = null;
+
+async function openInspector(clusterId: string, nodeId: string) {
+  inspectorNode = { clusterId, nodeId };
+  const drawer = document.getElementById("node-inspector")!;
+  const title = document.getElementById("inspector-title")!;
+  const body = document.getElementById("inspector-body")!;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  title.textContent = `Node ${nodeId.split("-").slice(-1)[0]}`;
+  body.innerHTML = `<div class="drawer-empty">Loading…</div>`;
+  try {
+    const [storeSnap, log] = await Promise.all([
+      api.getNodeStore(clusterId, nodeId),
+      api.getNodeLog(clusterId, nodeId),
+    ]);
+    const storeRows = Object.values(storeSnap || {})
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map((e) => `
+        <tr class="${e.tombstone ? "tombstone" : ""}">
+          <td>${esc(e.key)}</td>
+          <td>${e.tombstone ? "<i>deleted</i>" : esc(decodeB64(String(e.value)))}</td>
+          <td>${e.version ?? "—"}</td>
+          <td>${vcChipsHTML(e.vclock)}</td>
+        </tr>`).join("");
+    // op arrives as a numeric enum (0=put,1=..,2=delete). Label it for readability.
+    const opLabel = (op: unknown): string => {
+      const n = Number(op);
+      if (n === 2) return "delete";
+      if (n === 0 || n === 1) return "put";
+      return String(op);
+    };
+    const logRows = (log || []).slice(-40).reverse().map((l) => `
+        <tr>
+          <td>${l.index}</td>
+          <td>${l.term}</td>
+          <td>${esc(l.key)}</td>
+          <td>${esc(opLabel(l.op))}</td>
+          <td>${esc((l.origin_id || "").split("-").slice(-1)[0])}</td>
+        </tr>`).join("");
+    body.innerHTML = `
+      <div class="drawer-section-title">Store (${Object.keys(storeSnap || {}).length} keys)</div>
+      ${storeRows ? `<table class="drawer-table" id="inspector-store">
+        <thead><tr><th>key</th><th>value</th><th>ver</th><th>vclock</th></tr></thead>
+        <tbody>${storeRows}</tbody></table>` : `<div class="drawer-empty">Store is empty</div>`}
+      <div class="drawer-section-title">Replication Log (${(log || []).length} entries)</div>
+      ${logRows ? `<table class="drawer-table" id="inspector-log">
+        <thead><tr><th>idx</th><th>term</th><th>key</th><th>op</th><th>origin</th></tr></thead>
+        <tbody>${logRows}</tbody></table>` : `<div class="drawer-empty">Log is empty</div>`}
+    `;
+  } catch (e) {
+    body.innerHTML = `<div class="drawer-empty">Failed to load node state</div>`;
+    reportError("Inspector", e);
+  }
+}
+
+function closeInspector() {
+  inspectorNode = null;
+  const drawer = document.getElementById("node-inspector")!;
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+}
+
+document.getElementById("inspector-close")?.addEventListener("click", closeInspector);
+
+// ─── Diverged-state diff view ───────────────────────────────────────────────────
+async function renderDiff(cluster: ClusterState) {
+  const el = document.getElementById("diff-matrix")!;
+  const badge = document.getElementById("convergence-badge")!;
+  try {
+    const report = await api.getConvergence(cluster.id);
+    badge.textContent = report.converged ? "✓ converged" : `✗ ${report.diverged?.length || 0} diverged`;
+    badge.className = `consistency-badge ${report.converged ? "strong" : "eventual"}`;
+
+    // Build a key × online-node matrix. Diverged keys come with per-node values;
+    // for agreeing keys we still want the grid, so pull each online node's store.
+    const onlineIds = cluster.node_ids.filter((id) => cluster.nodes[id]?.state === "online");
+    if (onlineIds.length < 2) {
+      el.innerHTML = `<div class="diff-note">${esc(report.note || "Need ≥2 online replicas to compare")}</div>`;
+      return;
+    }
+    const stores = await Promise.all(onlineIds.map((id) =>
+      api.getNodeStore(cluster.id, id).catch((): NodeStoreSnapshot => ({}))));
+    const nodeStore: Record<string, Record<string, string>> = {};
+    const allKeys = new Set<string>();
+    onlineIds.forEach((id, i) => {
+      const snap = stores[i] || {};
+      const m: Record<string, string> = {};
+      for (const [k, e] of Object.entries(snap)) {
+        m[k] = e.tombstone ? "<tombstone>" : String(e.value);
+        allKeys.add(k);
+      }
+      nodeStore[id] = m;
+    });
+    if (allKeys.size === 0) {
+      el.innerHTML = `<div class="diff-note">No keys written yet</div>`;
+      return;
+    }
+    const shortId = (id: string) => id.split("-").slice(-1)[0];
+    const header = `<tr><th class="diff-key">key</th>${onlineIds.map((id) => `<th>${esc(shortId(id))}</th>`).join("")}</tr>`;
+    const rows = [...allKeys].sort().map((k) => {
+      const vals = onlineIds.map((id) => nodeStore[id][k]);
+      const present = vals.filter((v) => v !== undefined);
+      const agree = present.length > 0 && present.every((v) => v === present[0]) && present.length === onlineIds.length;
+      const cells = onlineIds.map((id) => {
+        const v = nodeStore[id][k];
+        if (v === undefined) return `<td class="absent" title="absent">∅</td>`;
+        if (v === "<tombstone>") return `<td class="tomb" title="tombstone">⌫</td>`;
+        const cls = agree ? "agree" : "diverge";
+        return `<td class="${cls}" title="${esc(decodeB64(v))}">${esc(decodeB64(v).slice(0, 6))}</td>`;
+      }).join("");
+      return `<tr><td class="diff-key">${esc(k)}</td>${cells}</tr>`;
+    }).join("");
+    el.innerHTML = `<table class="diff-matrix"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
+  } catch (e) {
+    el.innerHTML = `<div class="diff-note">Convergence unavailable</div>`;
+  }
+}
+
+// ─── Latency percentile charts ──────────────────────────────────────────────────
+function renderLatency(cluster: ClusterState) {
+  const el = document.getElementById("latency-chart")!;
+  const nm = Object.values(cluster.metrics.node_metrics || {});
+  // Prefer server-computed percentiles; fall back to computing from raw samples.
+  const gather = (kind: "write" | "read", p: 50 | 95 | 99): number => {
+    const field = `${kind}_p${p}` as keyof typeof nm[number];
+    const server = nm.map((m) => (m[field] as number) || 0).filter((v) => v > 0);
+    if (server.length) return Math.max(...server);
+    const all = nm.flatMap((m) => (kind === "write" ? m.write_latency_ms : m.read_latency_ms) || []);
+    if (!all.length) return 0;
+    const s = [...all].sort((a, b) => a - b);
+    return s[Math.min(s.length - 1, Math.max(0, Math.ceil((p / 100) * s.length) - 1))];
+  };
+  const fmt = (v: number) => v === 0 ? "—" : v < 1 ? "<1ms" : `${v.toFixed(1)}ms`;
+  const block = (kind: "write" | "read") => {
+    const p50 = gather(kind, 50), p95 = gather(kind, 95), p99 = gather(kind, 99);
+    const max = Math.max(p99, 1);
+    const bar = (p: "p50" | "p95" | "p99", v: number) => `
+      <div class="lat-row">
+        <span class="lat-label">${p}</span>
+        <span class="lat-bar-track"><span class="lat-bar ${p}" style="width:${Math.min(100, (v / max) * 100)}%"></span></span>
+        <span class="lat-val">${fmt(v)}</span>
+      </div>`;
+    return `<div class="lat-block">
+      <div class="lat-title">${kind} latency</div>
+      ${bar("p50", p50)}${bar("p95", p95)}${bar("p99", p99)}
+    </div>`;
+  };
+  el.innerHTML = block("write") + block("read");
+}
+
+// ─── CAP dial ───────────────────────────────────────────────────────────────────
+function renderCAP(cluster: ClusterState) {
+  const dial = document.getElementById("cap-dial");
+  if (!dial) return;
+  const strat = cluster.config.strategy;
+  const partitioned = Object.keys(cluster.partitions || {}).length > 0;
+  // CP: single-leader (sync) and raft favour consistency; AP: multi-leader and
+  // leaderless (unless W+R>N makes it strongly consistent) favour availability.
+  let cap: "CP" | "AP";
+  if (strat === "raft" || strat === "single_leader") cap = "CP";
+  else if (strat === "leaderless") {
+    const N = cluster.config.quorum_n || cluster.node_ids.length;
+    const W = cluster.config.quorum_w || 0, R = cluster.config.quorum_r || 0;
+    cap = (W + R) > N ? "CP" : "AP";
+  } else cap = "AP";
+  dial.dataset.cap = cap;
+  dial.classList.toggle("partitioned", partitioned);
+  const text = dial.querySelector(".cap-text");
+  if (text) text.textContent = partitioned ? `${cap} · partitioned` : cap;
+  dial.setAttribute("title", partitioned
+    ? `Partition active — ${cap === "CP" ? "minority side rejects to stay consistent" : "both sides stay available, may diverge"}`
+    : `${cap} posture given ${strat}`);
+}
+
 // ─── Main render loop ─────────────────────────────────────────────────────────
 function refresh() {
   const cluster = store.getActive();
@@ -862,6 +1199,104 @@ function refresh() {
   renderConsistency(cluster);
   renderMetrics(cluster);
   renderPartitionList(cluster.id);
+  renderDiff(cluster);
+  renderLatency(cluster);
+  renderCAP(cluster);
+  syncPermalink(cluster);
+}
+
+// ─── Theme toggle ───────────────────────────────────────────────────────────────
+const THEME_KEY = "replsim-theme";
+function applyTheme(theme: "dark" | "light") {
+  document.documentElement.setAttribute("data-theme", theme);
+  try { localStorage.setItem(THEME_KEY, theme); } catch {}
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  applyTheme(cur === "light" ? "dark" : "light");
+}
+// Restore saved theme (default dark).
+applyTheme(((): "dark" | "light" => {
+  try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch { return "dark"; }
+})());
+document.getElementById("theme-toggle")?.addEventListener("click", toggleTheme);
+
+// ─── Help modal ─────────────────────────────────────────────────────────────────
+function toggleHelp(force?: boolean) {
+  const m = document.getElementById("help-modal")!;
+  const open = force ?? !m.classList.contains("open");
+  m.classList.toggle("open", open);
+  m.setAttribute("aria-hidden", String(!open));
+}
+document.getElementById("help-btn")?.addEventListener("click", () => toggleHelp());
+document.getElementById("help-close")?.addEventListener("click", () => toggleHelp(false));
+
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────────
+document.addEventListener("keydown", (e) => {
+  // Don't hijack typing in inputs (except Escape).
+  const tag = (e.target as HTMLElement)?.tagName;
+  const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  if (e.key === "Escape") { closeInspector(); toggleHelp(false); return; }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  switch (e.key) {
+    case "w": e.preventDefault(); (document.getElementById("write-key") as HTMLInputElement)?.focus(); break;
+    case "r": (document.getElementById("read-btn") as HTMLElement)?.click(); break;
+    case "t": toggleTheme(); break;
+    case "?": toggleHelp(); break;
+    case "i": {
+      const c = store.getActive();
+      if (c?.node_ids.length) openInspector(c.id, c.node_ids[0]);
+      break;
+    }
+  }
+});
+
+// ─── Save/load permalink (cluster config in URL hash) ───────────────────────────────
+let lastPermalink = "";
+function syncPermalink(cluster: ClusterState) {
+  const cfg = cluster.config;
+  const params = new URLSearchParams();
+  params.set("strategy", cfg.strategy);
+  params.set("nodes", String(cluster.node_ids.length));
+  if (cfg.replication_mode) params.set("mode", cfg.replication_mode);
+  if (cfg.conflict_resolver) params.set("resolver", cfg.conflict_resolver);
+  if (cfg.quorum_n) params.set("n", String(cfg.quorum_n));
+  if (cfg.quorum_w) params.set("w", String(cfg.quorum_w));
+  if (cfg.quorum_r) params.set("r", String(cfg.quorum_r));
+  const hash = "#" + params.toString();
+  if (hash !== lastPermalink) {
+    lastPermalink = hash;
+    history.replaceState(null, "", hash);
+  }
+}
+
+// Restore a shared config from the URL hash by creating that cluster on load.
+async function restoreFromPermalink(): Promise<boolean> {
+  if (!location.hash || location.hash.length < 2) return false;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const strategy = p.get("strategy");
+  if (!strategy) return false;
+  const nodeCount = parseInt(p.get("nodes") || "4");
+  const cfg: Record<string, unknown> = { strategy, node_count: nodeCount };
+  if (p.get("mode")) cfg.replication_mode = p.get("mode");
+  if (p.get("resolver")) cfg.conflict_resolver = p.get("resolver");
+  if (strategy === "leaderless") {
+    cfg.quorum_n = parseInt(p.get("n") || String(nodeCount));
+    cfg.quorum_w = parseInt(p.get("w") || "3");
+    cfg.quorum_r = parseInt(p.get("r") || "3");
+  }
+  try {
+    const cluster = await api.startSimulation(cfg);
+    store.clusters.set(cluster.id, cluster);
+    store.activeClusterId = cluster.id;
+    store.notify();
+    refresh();
+    toast("Restored cluster from shared link", "success");
+    return true;
+  } catch (e) {
+    reportError("Restore from link", e);
+    return false;
+  }
 }
 
 // Subscribe to store changes
@@ -873,8 +1308,14 @@ setInterval(async () => {
   if (cluster) {
     await store.refreshCluster(cluster.id);
   }
+  // Keep an open inspector drawer live.
+  if (inspectorNode) openInspector(inspectorNode.clusterId, inspectorNode.nodeId);
 }, 2000);
 
 // Initial load
 renderControl();
-store.loadClusters().then(refresh);
+store.loadClusters().then(async () => {
+  // If no cluster exists yet and a permalink is present, restore it.
+  if (!store.getActive()) await restoreFromPermalink();
+  refresh();
+});
