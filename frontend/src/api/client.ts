@@ -6,6 +6,9 @@ import type {
   DemoRYWResult,
   DemoMonotonicResult,
   DemoPrefixResult,
+  ConvergenceReport,
+  NodeStoreSnapshot,
+  LogEntry,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -65,8 +68,11 @@ export const api = {
   removeNode: (id: string, nodeId: string) => request("DELETE", `/clusters/${id}/nodes/${nodeId}`),
   pauseNode: (id: string, nodeId: string) => request("POST", `/clusters/${id}/nodes/${nodeId}/pause`),
   resumeNode: (id: string, nodeId: string) => request("POST", `/clusters/${id}/nodes/${nodeId}/resume`),
-  getNodeLog: (id: string, nodeId: string) => request("GET", `/clusters/${id}/nodes/${nodeId}/log`),
-  getNodeStore: (id: string, nodeId: string) => request("GET", `/clusters/${id}/nodes/${nodeId}/store`),
+  getNodeLog: (id: string, nodeId: string) => request<LogEntry[]>("GET", `/clusters/${id}/nodes/${nodeId}/log`),
+  getNodeStore: (id: string, nodeId: string) => request<NodeStoreSnapshot>("GET", `/clusters/${id}/nodes/${nodeId}/store`),
+
+  // Convergence / divergence
+  getConvergence: (id: string) => request<ConvergenceReport>("GET", `/clusters/${id}/convergence`),
 
   // Network
   injectPartition: (id: string, groupA: string[], groupB: string[]) =>
