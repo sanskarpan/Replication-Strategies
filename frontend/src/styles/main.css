@@ -399,8 +399,121 @@ kbd {
 
 /* ─── Animated packets ──────────────────────────────────────────────────── */
 .packet { pointer-events: none; }
+
+/* ─── Violation banner ──────────────────────────────────────────────────── */
+.violation-banner {
+  position: fixed; top: 8px; left: 50%; transform: translate(-50%, -140%);
+  z-index: 95; max-width: 640px; width: max-content;
+  background: var(--danger); color: #fff; font-size: 12px; font-weight: 600;
+  padding: 8px 16px; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  display: flex; align-items: center; gap: 10px;
+  opacity: 0; transition: transform 0.25s ease, opacity 0.25s ease;
+  pointer-events: none;
+}
+.violation-banner.show { transform: translate(-50%, 0); opacity: 1; }
+.violation-banner .vb-icon { font-size: 15px; }
+.violation-banner .vb-detail { font-weight: 400; opacity: 0.9; }
+
+/* Pulse a node circle when it is implicated in a violation. */
+.node-circle.violation { animation: violationPulse 0.6s ease-in-out 3; }
+@keyframes violationPulse {
+  0%,100% { stroke: var(--danger); filter: none; }
+  50% { stroke: var(--danger); filter: drop-shadow(0 0 6px var(--danger)); }
+}
+
+/* ─── Event throughput indicator ────────────────────────────────────────── */
+.event-rate {
+  display: inline-flex; align-items: baseline; gap: 3px;
+  padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
+}
+.event-rate .event-rate-val { color: var(--accent); font-weight: 700; }
+.event-rate.active .event-rate-val { color: var(--accent2); }
+.event-rate .event-rate-unit { font-size: 9px; }
+
+/* ─── Event log toolbar (filter + type) ─────────────────────────────────── */
+.event-toolbar {
+  display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+.event-toolbar #event-filter { flex: 1; min-width: 0; }
+.event-toolbar select { max-width: 130px; }
+.event-log li.filtered-out { display: none; }
+
+/* ─── Event timeline strip ──────────────────────────────────────────────── */
+.event-timeline {
+  display: flex; align-items: flex-end; gap: 1px; height: 22px;
+  padding: 3px 8px; border-bottom: 1px solid var(--border); background: var(--bg);
+  overflow: hidden;
+}
+.event-timeline .tick {
+  flex: 0 0 3px; height: 100%; border-radius: 1px; opacity: 0.85;
+  background: var(--text-dim);
+}
+.event-timeline .tick.replication { background: var(--accent); }
+.event-timeline .tick.conflict { background: var(--danger); }
+.event-timeline .tick.repair { background: var(--accent2); }
+.event-timeline .tick.quorum { background: var(--warn); }
+.event-timeline .tick.node { background: var(--replica); }
+.event-timeline .tick.new { animation: tickIn 0.4s ease; }
+@keyframes tickIn { from { opacity: 0; transform: scaleY(0.2); } to { opacity: 0.85; transform: scaleY(1); } }
+
+/* ─── Workload / config panel ───────────────────────────────────────────── */
+.workload-panel {
+  position: fixed; left: 10px; bottom: 10px; z-index: 55; width: 260px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3); overflow: hidden;
+}
+.workload-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px; background: var(--surface2); border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim);
+}
+.workload-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.workload-panel.collapsed .workload-body { display: none; }
+.workload-summary { font-size: 10px; font-family: monospace; color: var(--text-dim); min-height: 12px; word-break: break-word; }
+.workload-config { display: flex; gap: 6px; flex-wrap: wrap; }
+.workload-progress { height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+.workload-progress > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width 0.1s linear; }
+
+/* ─── Command palette ───────────────────────────────────────────────────── */
+.palette-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;
+  display: none; align-items: flex-start; justify-content: center; padding-top: 12vh;
+}
+.palette-backdrop.open { display: flex; }
+.palette {
+  width: 480px; max-width: 92vw; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.palette-input {
+  width: 100%; border: none; border-bottom: 1px solid var(--border) !important;
+  border-radius: 0 !important; background: var(--surface) !important;
+  padding: 12px 14px !important; font-size: 14px !important; color: var(--text);
+}
+.palette-input:focus { outline: none; }
+.palette-list { list-style: none; max-height: 320px; overflow-y: auto; }
+.palette-list li {
+  padding: 9px 14px; font-size: 12px; cursor: pointer; display: flex;
+  align-items: center; gap: 10px; border-bottom: 1px solid var(--border);
+}
+.palette-list li .pal-icon { width: 18px; text-align: center; opacity: 0.8; }
+.palette-list li .pal-hint { margin-left: auto; font-size: 10px; color: var(--text-dim); }
+.palette-list li.active, .palette-list li:hover { background: var(--surface2); }
+.palette-list li.active { box-shadow: inset 3px 0 0 var(--accent); }
+.palette-empty { padding: 14px; color: var(--text-dim); font-size: 12px; text-align: center; }
+
+/* Keyboard focus visibility for accessibility */
+.btn:focus-visible, select:focus-visible, input:focus-visible, .cap-dial:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .link-line.active { animation: none; }
   .toast { animation: none; }
   .drawer { transition: none; }
+  .violation-banner { transition: opacity 0.01s; }
+  .node-circle.violation { animation: none; }
+  .event-timeline .tick.new { animation: none; }
 }
