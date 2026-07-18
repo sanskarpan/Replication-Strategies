@@ -37,6 +37,34 @@ ws.on("*", (evt) => {
 ws.onStatus(renderWSStatus);
 ws.connect();
 
+// ─── Real-time consistency-violation banner ─────────────────────────────────
+let violationTimer: ReturnType<typeof setTimeout> | null = null;
+function flashViolation(message: string, detail = "", nodes: string[] = []) {
+  const banner = document.getElementById("violation-banner");
+  if (banner) {
+    banner.innerHTML = `<span class="vb-icon">⚠</span><span class="vb-msg">${esc(message)}</span>` +
+      (detail ? `<span class="vb-detail">${esc(detail)}</span>` : "");
+    banner.classList.add("show");
+    banner.setAttribute("aria-hidden", "false");
+    if (violationTimer) clearTimeout(violationTimer);
+    violationTimer = setTimeout(() => {
+      banner.classList.remove("show");
+      banner.setAttribute("aria-hidden", "true");
+    }, 5000);
+  }
+  // Pulse the offending node circles, if any are on screen.
+  if (topoSvg && nodes.length) {
+    topoSvg.select(".nodes").selectAll<SVGGElement, TopoNode>("g.node-g")
+      .select<SVGCircleElement>("circle")
+      .filter((d) => nodes.includes(d.id))
+      .classed("violation", true)
+      .each(function () {
+        const c = this;
+        setTimeout(() => c.classList.remove("violation"), 2000);
+      });
+  }
+}
+
 function renderWSStatus(status: WSStatus) {
   const pill = document.getElementById("ws-status");
   if (!pill) return;
@@ -70,16 +98,91 @@ function vcChipsHTML(vc: VectorClock | undefined): string {
     .join("") + `</span>`;
 }
 
-// ─── Event Log ───────────────────────────────────────────────────────────────
+// ─── Event Log (with filter/search + timeline strip + rolling rate) ──────────
 const eventLog = document.getElementById("event-log")!;
 let eventCount = 0;
 
+// Filter state, driven by the toolbar text input + type dropdown.
+const eventFilter = { text: "", type: "" };
+const seenEventTypes = new Set<string>();
+
+// Timeline strip: a rolling list of coloured ticks for recent events.
+const timelineEl = document.getElementById("event-timeline");
+function timelineClass(type: string): string {
+  if (type === "conflict_detected" || type === "conflict_resolved" || type === "quorum_failed") return "conflict";
+  if (type === "read_repair" || type === "hinted_handoff") return "repair";
+  if (type === "quorum_achieved") return "quorum";
+  if (type.startsWith("entry_replicated") || type === "follower_lag") return "replication";
+  if (type.startsWith("node_") || type.startsWith("partition_") || type === "leader_elected") return "node";
+  return "";
+}
+
+// Rolling event-rate: keep timestamps in a 5s window, recompute ev/s on a timer.
+const rateWindow: number[] = [];
+function pushRate() {
+  rateWindow.push(Date.now());
+}
+function renderEventRate() {
+  const now = Date.now();
+  while (rateWindow.length && now - rateWindow[0] > 5000) rateWindow.shift();
+  const rate = rateWindow.length / 5;
+  const el = document.getElementById("event-rate");
+  if (!el) return;
+  const val = el.querySelector(".event-rate-val");
+  if (val) val.textContent = rate.toFixed(1);
+  el.classList.toggle("active", rate > 0);
+}
+setInterval(renderEventRate, 1000);
+
+function matchesFilter(type: string, dataStr: string): boolean {
+  if (eventFilter.type && type !== eventFilter.type) return false;
+  if (eventFilter.text) {
+    const hay = (type + " " + dataStr).toLowerCase();
+    if (!hay.includes(eventFilter.text.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function applyEventFilter() {
+  eventLog.querySelectorAll<HTMLLIElement>("li").forEach((li) => {
+    const type = li.dataset.etype || "";
+    const dataStr = li.dataset.edata || "";
+    li.classList.toggle("filtered-out", !matchesFilter(type, dataStr));
+  });
+}
+
+function registerEventType(type: string) {
+  if (seenEventTypes.has(type)) return;
+  seenEventTypes.add(type);
+  const sel = document.getElementById("event-type-filter") as HTMLSelectElement | null;
+  if (!sel) return;
+  const opt = document.createElement("option");
+  opt.value = type;
+  opt.textContent = type;
+  sel.appendChild(opt);
+}
+
+function pushTimelineTick(type: string) {
+  if (!timelineEl) return;
+  const tick = document.createElement("div");
+  tick.className = `tick ${timelineClass(type)}${reduceMotion ? "" : " new"}`.trim();
+  tick.title = type;
+  timelineEl.appendChild(tick);
+  while (timelineEl.children.length > 80) timelineEl.firstChild?.remove();
+}
+
 function appendEvent(evt: SimEvent) {
   eventCount++;
+  pushRate();
+  registerEventType(evt.type);
+  pushTimelineTick(evt.type);
   const li = document.createElement("li");
   const ts = new Date(evt.timestamp).toLocaleTimeString();
   const dataStr = evt.data ? JSON.stringify(evt.data).slice(0, 80) : "";
-  li.innerHTML = `<span class="event-type">${evt.type}</span><span class="event-time">${ts}</span><span class="event-data">${dataStr}</span>`;
+  li.dataset.etype = evt.type;
+  li.dataset.edata = dataStr;
+  li.innerHTML = `<span class="event-type">${evt.type}</span><span class="event-time">${ts}</span><span class="event-data">${esc(dataStr)}</span>`;
+  if (!matchesFilter(evt.type, dataStr)) li.classList.add("filtered-out");
   eventLog.prepend(li);
   // Keep at most 100 entries in the DOM
   while (eventLog.children.length > 100) eventLog.lastChild?.remove();
@@ -87,6 +190,16 @@ function appendEvent(evt: SimEvent) {
 
 document.getElementById("clear-events-btn")!.addEventListener("click", () => {
   eventLog.innerHTML = "";
+  if (timelineEl) timelineEl.innerHTML = "";
+});
+
+document.getElementById("event-filter")?.addEventListener("input", (e) => {
+  eventFilter.text = (e.target as HTMLInputElement).value;
+  applyEventFilter();
+});
+document.getElementById("event-type-filter")?.addEventListener("change", (e) => {
+  eventFilter.type = (e.target as HTMLSelectElement).value;
+  applyEventFilter();
 });
 
 // ─── D3 Topology ─────────────────────────────────────────────────────────────
@@ -430,6 +543,27 @@ ws.on("quorum_failed", (evt) => {
     <div style="font-size:10px;color:var(--text-dim)">acked ${d.acked}/${d.w} required</div>`;
   conflictsBody.prepend(div);
   if (conflictsBody.children.length > 50) conflictsBody.lastChild?.remove();
+  // Surface as a real-time consistency-violation banner.
+  const nodes = (evt.node_id ? [evt.node_id] : []).concat(
+    Array.isArray(d.nodes) ? (d.nodes as string[]) : []);
+  flashViolation(
+    `Quorum failed for "${d.key ?? "?"}"`,
+    d.acked != null && d.w != null ? `acked ${d.acked}/${d.w} required` : "",
+    nodes,
+  );
+});
+
+// Any event that carries an explicit invariant/violation payload also flashes the banner.
+ws.on("*", (evt) => {
+  const d = evt.data || {};
+  const viol = d.violations ?? d.violation;
+  const hasViol = (Array.isArray(viol) && viol.length > 0) || (typeof viol === "string" && viol) ||
+    (d.consistent === false) || (d.invariant_violated === true);
+  if (!hasViol || evt.type === "quorum_failed") return;
+  const msg = Array.isArray(viol) ? `${viol.length} invariant violation(s)` :
+    typeof viol === "string" ? viol : "Consistency invariant violated";
+  const nodes = evt.node_id ? [evt.node_id] : (Array.isArray(d.nodes) ? (d.nodes as string[]) : []);
+  flashViolation(msg, String(evt.type), nodes);
 });
 
 ws.on("read_repair", (evt) => {
@@ -1231,12 +1365,209 @@ function toggleHelp(force?: boolean) {
 document.getElementById("help-btn")?.addEventListener("click", () => toggleHelp());
 document.getElementById("help-close")?.addEventListener("click", () => toggleHelp(false));
 
+// ─── Config export / import ─────────────────────────────────────────────────
+function currentConfigSnapshot(): { config: Record<string, unknown>; faults: Record<string, unknown> } {
+  const cluster = store.getActive();
+  const config = cluster ? { ...cluster.config, node_count: cluster.node_ids.length } : {};
+  const faults = cluster
+    ? {
+        partitions: Object.values(cluster.partitions || {}).map((p) => ({
+          group_a: Object.keys(p.group_a),
+          group_b: Object.keys(p.group_b),
+        })),
+        dropped_messages: cluster.dropped_messages ?? 0,
+      }
+    : {};
+  return { config, faults };
+}
+
+function exportConfig() {
+  const snap = currentConfigSnapshot();
+  const blob = new Blob([JSON.stringify(snap, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `replsim-config-${(snap.config.strategy as string) || "empty"}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast("Config downloaded", "success");
+}
+document.getElementById("export-config-btn")?.addEventListener("click", exportConfig);
+
+async function importConfig(file: File) {
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text) as { config?: Record<string, unknown> };
+    const cfg = parsed.config;
+    if (!cfg || !cfg.strategy) throw new Error("Missing config.strategy in file");
+    const startCfg: Record<string, unknown> = {
+      strategy: cfg.strategy,
+      node_count: cfg.node_count ?? 4,
+    };
+    if (cfg.replication_mode) startCfg.replication_mode = cfg.replication_mode;
+    if (cfg.conflict_resolver) startCfg.conflict_resolver = cfg.conflict_resolver;
+    if (cfg.quorum_n) startCfg.quorum_n = cfg.quorum_n;
+    if (cfg.quorum_w) startCfg.quorum_w = cfg.quorum_w;
+    if (cfg.quorum_r) startCfg.quorum_r = cfg.quorum_r;
+    const cluster = await api.startSimulation(startCfg);
+    store.clusters.set(cluster.id, cluster);
+    store.activeClusterId = cluster.id;
+    store.notify();
+    refresh();
+    toast(`Imported ${cfg.strategy} cluster`, "success");
+  } catch (e) {
+    reportError("Import config", e);
+  }
+}
+document.getElementById("import-config")?.addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) importConfig(file);
+  input.value = ""; // allow re-importing the same file
+});
+
+// ─── Workload generator ─────────────────────────────────────────────────────
+let workloadRunning = false;
+async function runWorkload() {
+  if (workloadRunning) return;
+  const cluster = store.getActive();
+  const summary = document.getElementById("workload-summary")!;
+  if (!cluster) { toast("No active cluster", "warn"); return; }
+  const ops = Math.max(1, Math.min(500, parseInt((document.getElementById("workload-ops") as HTMLInputElement).value) || 20));
+  const readPct = Math.max(0, Math.min(100, parseInt((document.getElementById("workload-ratio") as HTMLInputElement).value) || 50));
+  workloadRunning = true;
+  const btn = document.getElementById("run-workload-btn") as HTMLButtonElement;
+  btn.disabled = true;
+  let writes = 0, reads = 0, errors = 0;
+  const clientId = "workload";
+  const knownKeys: string[] = [];
+  summary.innerHTML = `running… <div class="workload-progress"><span id="workload-bar"></span></div>`;
+  const bar = document.getElementById("workload-bar") as HTMLElement | null;
+  for (let i = 0; i < ops; i++) {
+    const doRead = knownKeys.length > 0 && Math.random() * 100 < readPct;
+    try {
+      if (doRead) {
+        const key = knownKeys[Math.floor(Math.random() * knownKeys.length)];
+        await api.read(cluster.id, key, clientId);
+        reads++;
+      } else {
+        const key = `wl-${Math.floor(Math.random() * Math.max(3, ops / 4))}`;
+        await api.write(cluster.id, key, `v${i}-${Math.random().toString(36).slice(2, 6)}`, clientId);
+        if (!knownKeys.includes(key)) knownKeys.push(key);
+        writes++;
+      }
+    } catch {
+      errors++;
+    }
+    if (bar) bar.style.width = `${((i + 1) / ops) * 100}%`;
+  }
+  workloadRunning = false;
+  btn.disabled = false;
+  summary.textContent = `done: ${writes} writes · ${reads} reads · ${errors} err`;
+  await store.refreshCluster(cluster.id);
+  refresh();
+}
+document.getElementById("run-workload-btn")?.addEventListener("click", runWorkload);
+document.getElementById("workload-toggle")?.addEventListener("click", () => {
+  document.getElementById("workload-panel")?.classList.toggle("collapsed");
+});
+
+// ─── Command palette (Cmd/Ctrl+K) ───────────────────────────────────────────
+interface PaletteCommand { id: string; label: string; icon: string; hint?: string; run: () => void; }
+const paletteCommands: PaletteCommand[] = [
+  { id: "create", label: "Create cluster", icon: "＋", hint: "form", run: () => document.getElementById("create-cluster-btn")?.click() },
+  { id: "write", label: "Write a key", icon: "✎", hint: "w", run: () => { (document.getElementById("write-key") as HTMLInputElement)?.focus(); } },
+  { id: "read", label: "Read current key", icon: "↺", hint: "r", run: () => document.getElementById("read-btn")?.click() },
+  { id: "workload", label: "Run workload", icon: "⚡", run: () => runWorkload() },
+  { id: "scenario", label: "Run selected scenario", icon: "▶", run: () => document.getElementById("run-scenario-btn")?.click() },
+  { id: "theme", label: "Toggle theme", icon: "◐", hint: "t", run: () => toggleTheme() },
+  { id: "inspect", label: "Open node inspector", icon: "🔍", hint: "i", run: () => { const c = store.getActive(); if (c?.node_ids.length) openInspector(c.id, c.node_ids[0]); } },
+  { id: "export", label: "Export config", icon: "⬇", run: () => exportConfig() },
+  { id: "partition", label: "Inject partition", icon: "✂", run: () => document.getElementById("partition-btn")?.click() },
+  { id: "clearfaults", label: "Clear faults", icon: "✓", run: () => document.getElementById("clear-faults-btn")?.click() },
+  { id: "reset", label: "Reset all clusters", icon: "⟲", run: () => document.getElementById("reset-btn")?.click() },
+  { id: "help", label: "Keyboard shortcuts", icon: "?", hint: "?", run: () => toggleHelp(true) },
+];
+let paletteActive = 0;
+let paletteFiltered: PaletteCommand[] = paletteCommands;
+
+// Tiny subsequence fuzzy match — every query char must appear in order.
+function fuzzyMatch(query: string, text: string): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase(), t = text.toLowerCase();
+  let i = 0;
+  for (const ch of t) { if (ch === q[i]) i++; if (i === q.length) return true; }
+  return i === q.length;
+}
+
+function renderPalette() {
+  const list = document.getElementById("palette-list")!;
+  if (paletteFiltered.length === 0) {
+    list.innerHTML = `<li class="palette-empty" role="option">No matching commands</li>`;
+    return;
+  }
+  list.innerHTML = paletteFiltered.map((c, i) => `
+    <li role="option" data-idx="${i}" aria-selected="${i === paletteActive}" class="${i === paletteActive ? "active" : ""}">
+      <span class="pal-icon">${c.icon}</span><span>${esc(c.label)}</span>${c.hint ? `<span class="pal-hint">${esc(c.hint)}</span>` : ""}
+    </li>`).join("");
+  list.querySelectorAll<HTMLLIElement>("li[data-idx]").forEach((li) => {
+    li.addEventListener("click", () => { paletteActive = +li.dataset.idx!; runPaletteSelection(); });
+  });
+}
+
+function filterPalette(query: string) {
+  paletteFiltered = paletteCommands.filter((c) => fuzzyMatch(query, c.label));
+  paletteActive = 0;
+  renderPalette();
+}
+
+function togglePalette(force?: boolean) {
+  const p = document.getElementById("command-palette")!;
+  const open = force ?? !p.classList.contains("open");
+  p.classList.toggle("open", open);
+  p.setAttribute("aria-hidden", String(!open));
+  if (open) {
+    const input = document.getElementById("palette-input") as HTMLInputElement;
+    input.value = "";
+    filterPalette("");
+    setTimeout(() => input.focus(), 0);
+  }
+}
+
+function runPaletteSelection() {
+  const cmd = paletteFiltered[paletteActive];
+  togglePalette(false);
+  if (cmd) setTimeout(() => cmd.run(), 0);
+}
+
+document.getElementById("palette-btn")?.addEventListener("click", () => togglePalette(true));
+document.getElementById("command-palette")?.addEventListener("click", (e) => {
+  if ((e.target as HTMLElement).id === "command-palette") togglePalette(false);
+});
+document.getElementById("palette-input")?.addEventListener("input", (e) => {
+  filterPalette((e.target as HTMLInputElement).value);
+});
+document.getElementById("palette-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") { e.preventDefault(); paletteActive = Math.min(paletteFiltered.length - 1, paletteActive + 1); renderPalette(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); paletteActive = Math.max(0, paletteActive - 1); renderPalette(); }
+  else if (e.key === "Enter") { e.preventDefault(); runPaletteSelection(); }
+  else if (e.key === "Escape") { e.preventDefault(); togglePalette(false); }
+});
+
 // ─── Keyboard shortcuts ───────────────────────────────────────────────────────────
 document.addEventListener("keydown", (e) => {
+  // Cmd/Ctrl+K opens the command palette from anywhere (even while typing).
+  if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    togglePalette();
+    return;
+  }
   // Don't hijack typing in inputs (except Escape).
   const tag = (e.target as HTMLElement)?.tagName;
   const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-  if (e.key === "Escape") { closeInspector(); toggleHelp(false); return; }
+  if (e.key === "Escape") { closeInspector(); toggleHelp(false); togglePalette(false); return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   switch (e.key) {
     case "w": e.preventDefault(); (document.getElementById("write-key") as HTMLInputElement)?.focus(); break;

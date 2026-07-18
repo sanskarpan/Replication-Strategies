@@ -7,24 +7,32 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+<!-- Real-time consistency-violation banner (auto-dismissing). aria-live so screen
+     readers announce violations as they arrive. -->
+<div id="violation-banner" class="violation-banner" role="alert" aria-live="assertive" aria-hidden="true"></div>
+
 <!-- Top bar: WS status pill + theme toggle + help -->
-<div id="topbar">
+<div id="topbar" role="banner">
   <span id="app-title">Replication Strategies</span>
   <div id="topbar-right">
-    <span id="cap-dial" class="cap-dial" title="CAP posture (CP/AP) given strategy + partition state">
+    <span id="event-rate" class="event-rate" title="Rolling event throughput (events/sec over the last 5s)" aria-live="polite" aria-label="Event throughput">
+      <span class="event-rate-val">0.0</span><span class="event-rate-unit">ev/s</span>
+    </span>
+    <span id="cap-dial" class="cap-dial" title="CAP posture (CP/AP) given strategy + partition state" aria-label="CAP posture">
       <span class="cap-dot"></span><span class="cap-text">—</span>
     </span>
-    <span id="ws-status" class="ws-pill" data-state="connecting" title="WebSocket event stream status">
+    <span id="ws-status" class="ws-pill" data-state="connecting" title="WebSocket event stream status" role="status" aria-label="WebSocket status">
       <span class="ws-dot"></span><span class="ws-label">connecting</span>
     </span>
-    <button class="btn btn-sm" id="help-btn" title="Keyboard shortcuts (?)">?</button>
-    <button class="btn btn-sm" id="theme-toggle" title="Toggle light/dark theme (t)">◐ Theme</button>
+    <button class="btn btn-sm" id="palette-btn" title="Command palette (Cmd/Ctrl+K)" aria-label="Open command palette">⌘K</button>
+    <button class="btn btn-sm" id="help-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+    <button class="btn btn-sm" id="theme-toggle" title="Toggle light/dark theme (t)" aria-label="Toggle theme">◐ Theme</button>
   </div>
 </div>
 
-<div id="app">
+<div id="app" role="main" aria-label="Replication simulator dashboard">
   <!-- Panel 1: Topology -->
-  <div class="panel" id="topology-panel">
+  <div class="panel" id="topology-panel" role="region" aria-label="Topology">
     <div class="panel-header">
       <span>Topology</span>
       <span id="strategy-badge" style="font-size:10px;color:var(--accent)">no cluster</span>
@@ -33,7 +41,7 @@
   </div>
 
   <!-- Panel 2: Lag Timeline -->
-  <div class="panel" id="lag-panel">
+  <div class="panel" id="lag-panel" role="region" aria-label="Replication lag">
     <div class="panel-header">
       <span>Replication Lag</span>
       <div class="lag-legend" id="lag-legend"></div>
@@ -42,7 +50,7 @@
   </div>
 
   <!-- Panel 3: Quorum Visualizer -->
-  <div class="panel" id="quorum-panel">
+  <div class="panel" id="quorum-panel" role="region" aria-label="Quorum visualizer">
     <div class="panel-header">
       <span>Quorum (W+R&gt;N)</span>
     </div>
@@ -52,7 +60,7 @@
   </div>
 
   <!-- Panel 3b: Diverged-state diff view -->
-  <div class="panel" id="diff-panel">
+  <div class="panel" id="diff-panel" role="region" aria-label="Divergence diff">
     <div class="panel-header">
       <span>Divergence</span>
       <span id="convergence-badge" class="consistency-badge strong">—</span>
@@ -61,7 +69,7 @@
   </div>
 
   <!-- Panel 3c: Latency percentiles -->
-  <div class="panel" id="latency-panel">
+  <div class="panel" id="latency-panel" role="region" aria-label="Latency percentiles">
     <div class="panel-header">
       <span>Latency p50/p95/p99</span>
     </div>
@@ -69,7 +77,7 @@
   </div>
 
   <!-- Panel 4: Conflict Log -->
-  <div class="panel" id="conflicts-panel">
+  <div class="panel" id="conflicts-panel" role="region" aria-label="Conflict log">
     <div class="panel-header">
       <span>Conflict Log</span>
       <span id="conflict-count" style="color:var(--danger)">0 conflicts</span>
@@ -78,29 +86,65 @@
   </div>
 
   <!-- Panel 5: Consistency Demos -->
-  <div class="panel" id="consistency-panel">
+  <div class="panel" id="consistency-panel" role="region" aria-label="Consistency guarantees">
     <div class="panel-header">Consistency Guarantees</div>
     <div class="panel-body" id="consistency-body"></div>
   </div>
 
   <!-- Panel 6: Events -->
-  <div class="panel" id="events-panel">
+  <div class="panel" id="events-panel" role="region" aria-label="Event stream">
     <div class="panel-header">
       <span>Event Stream</span>
       <button class="btn btn-sm" id="clear-events-btn">Clear</button>
     </div>
+    <div class="event-toolbar" role="search">
+      <input type="text" id="event-filter" placeholder="Filter events…" aria-label="Filter event log by text" />
+      <select id="event-type-filter" aria-label="Filter event log by type">
+        <option value="">All types</option>
+      </select>
+    </div>
+    <!-- Lightweight timeline strip: recent event ticks coloured by type -->
+    <div id="event-timeline" class="event-timeline" role="img" aria-label="Recent event timeline"></div>
     <div class="panel-body">
-      <ul class="event-log" id="event-log"></ul>
+      <ul class="event-log" id="event-log" role="log" aria-live="polite" aria-label="Event log"></ul>
     </div>
   </div>
 
   <!-- Panel 7: Control -->
-  <div class="panel" id="control-panel">
+  <div class="panel" id="control-panel" role="region" aria-label="Control panel">
     <div class="panel-header">
       <span>Control</span>
-      <div class="metric-cards" id="metric-cards"></div>
+      <div class="metric-cards" id="metric-cards" role="group" aria-label="Cluster metrics"></div>
     </div>
     <div class="panel-body" id="control-body"></div>
+  </div>
+</div>
+
+<!-- Workload generator + config export/import panel (floating, top-left, collapsible) -->
+<div id="workload-panel" class="workload-panel" role="region" aria-label="Workload generator and config">
+  <div class="workload-header">
+    <span>Workload &amp; Config</span>
+    <button class="btn btn-sm" id="workload-toggle" title="Collapse/expand" aria-label="Collapse panel">–</button>
+  </div>
+  <div class="workload-body" id="workload-body">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="workload-ops">Ops</label>
+        <input type="number" id="workload-ops" value="20" min="1" max="500" style="width:60px" />
+      </div>
+      <div class="form-group">
+        <label for="workload-ratio">Read %</label>
+        <input type="number" id="workload-ratio" value="50" min="0" max="100" style="width:56px" />
+      </div>
+      <button class="btn btn-primary" id="run-workload-btn">Run workload</button>
+    </div>
+    <div id="workload-summary" class="workload-summary" aria-live="polite"></div>
+    <div class="workload-config">
+      <button class="btn btn-sm" id="export-config-btn" title="Download current config + faults as JSON">⬇ Export config</button>
+      <label class="btn btn-sm" for="import-config" title="Restore config from a JSON file" style="cursor:pointer">⬆ Import
+        <input type="file" id="import-config" accept="application/json,.json" style="display:none" aria-label="Import config file" />
+      </label>
+    </div>
   </div>
 </div>
 
@@ -114,7 +158,15 @@
 </div>
 
 <!-- Non-blocking toast notifications -->
-<div id="toast-container"></div>
+<div id="toast-container" role="status" aria-live="polite" aria-label="Notifications"></div>
+
+<!-- Command palette (Cmd/Ctrl+K) -->
+<div id="command-palette" class="palette-backdrop" aria-hidden="true">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input type="text" id="palette-input" class="palette-input" placeholder="Type a command…" aria-label="Command palette search" role="combobox" aria-expanded="true" aria-controls="palette-list" />
+    <ul id="palette-list" class="palette-list" role="listbox" aria-label="Commands"></ul>
+  </div>
+</div>
 
 <!-- Keyboard shortcut help overlay -->
 <div id="help-modal" class="modal-backdrop" aria-hidden="true">
@@ -128,6 +180,7 @@
       <div class="kbd-row"><kbd>r</kbd><span>Read the current key</span></div>
       <div class="kbd-row"><kbd>i</kbd><span>Inspect the first node</span></div>
       <div class="kbd-row"><kbd>t</kbd><span>Toggle light / dark theme</span></div>
+      <div class="kbd-row"><kbd>⌘/Ctrl K</kbd><span>Open command palette</span></div>
       <div class="kbd-row"><kbd>?</kbd><span>Toggle this help</span></div>
       <div class="kbd-row"><kbd>Esc</kbd><span>Close drawer / modal</span></div>
     </div>

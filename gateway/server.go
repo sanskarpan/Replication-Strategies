@@ -34,11 +34,13 @@ func (s *Server) Router() http.Handler {
 	r.Use(s.corsMiddleware)
 
 	// Operational endpoints (top-level, unversioned): liveness, readiness, Prometheus
-	// metrics, and build version.
+	// metrics, build version, and self-hosted API docs (Swagger UI + OpenAPI spec).
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/metrics", s.handleMetrics)
 	r.Get("/version", s.handleVersion)
+	r.Get("/docs", s.DocsHandler())
+	r.Get("/openapi.yaml", s.OpenAPIHandler())
 
 	// REST API
 	r.Route("/api/v1", func(r chi.Router) {
@@ -75,6 +77,11 @@ func (s *Server) Router() http.Handler {
 		// Learning content: DDIA-mapped glossary + guided lessons
 		r.Get("/glossary", s.handleGlossary)
 		r.Get("/lessons", s.handleLessons)
+
+		// Custom YAML scenarios, report export, and side-by-side strategy race
+		r.Post("/scenarios/yaml", s.handleRunScenarioYAML)
+		r.Get("/clusters/{id}/export", s.handleExportReport)
+		r.Post("/race", s.handleStrategyRace)
 
 		// Writes & reads
 		r.Post("/clusters/{id}/write", s.handleWrite)

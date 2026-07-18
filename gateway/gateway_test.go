@@ -326,3 +326,39 @@ func TestGateway_GlossaryAndLessons(t *testing.T) {
 	assert.Contains(t, body, "predict")
 	assert.Contains(t, body, "reveal")
 }
+
+// Wave 5: docs UI, OpenAPI spec, YAML scenarios, export report, strategy race.
+func TestGateway_DocsAndOpenAPI(t *testing.T) {
+	ts, _ := newTestServer(t)
+	code, body := doJSON(t, "GET", ts.URL+"/docs", "")
+	require.Equal(t, http.StatusOK, code)
+	assert.Contains(t, strings.ToLower(body), "swagger")
+	code, body = doJSON(t, "GET", ts.URL+"/openapi.yaml", "")
+	require.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "openapi:")
+}
+
+func TestGateway_YAMLScenarioExportRace(t *testing.T) {
+	ts, _ := newTestServer(t)
+	// YAML scenario.
+	yaml := "name: MyTest\nstrategy: leaderless\nnode_count: 3\nquorum_n: 3\nquorum_w: 2\nquorum_r: 2\nsteps:\n  - action: write\n    node: n0\n    key: k\n    value: v\n    narration: write k=v\n  - action: anti_entropy\n    narration: reconcile\n"
+	code, body := doJSON(t, "POST", ts.URL+"/api/v1/scenarios/yaml", yaml)
+	require.Equal(t, http.StatusCreated, code, body)
+	var sc map[string]string
+	require.NoError(t, json.Unmarshal([]byte(body), &sc))
+	cid := sc["cluster_id"]
+	require.NotEmpty(t, cid)
+	time.Sleep(300 * time.Millisecond)
+
+	// Export report.
+	code, body = doJSON(t, "GET", ts.URL+"/api/v1/clusters/"+cid+"/export", "")
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, "generated_at")
+	assert.Contains(t, body, "convergence")
+
+	// Strategy race.
+	code, body = doJSON(t, "POST", ts.URL+"/api/v1/race", `{"strategies":["single_leader","leaderless"],"node_count":3,"ops":10}`)
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, "single_leader")
+	assert.Contains(t, body, "leaderless")
+}

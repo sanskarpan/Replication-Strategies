@@ -1,0 +1,50 @@
+# Pre-commit hooks for the replication-strategies repo.
+# Install:  pip install pre-commit && pre-commit install
+# Run all:  pre-commit run --all-files
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  # ---------------------------------------------------------------------------
+  # Generic hygiene hooks from pre-commit/pre-commit-hooks.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  # ---------------------------------------------------------------------------
+  # Local Go hooks. Run against the system toolchain so contributors don't need a
+  # pinned mirror; gofmt fails the commit if any staged Go file is unformatted.
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        description: Fail if any Go file is not gofmt-formatted.
+        entry: bash -c 'unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed on:"; echo "$unformatted"; exit 1; fi' --
+        language: system
+        types: [go]
+        pass_filenames: true
+
+      - id: go-vet
+        name: go vet
+        description: Run go vet across the whole module.
+        entry: bash -c 'go vet ./...'
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      # Optional heavier lint. Runs only when explicitly requested:
+      #   pre-commit run --hook-stage manual golangci-lint
+      - id: golangci-lint
+        name: golangci-lint
+        description: Run golangci-lint (optional / manual stage).
+        entry: bash -c 'golangci-lint run ./...'
+        language: system
+        types: [go]
+        pass_filenames: false
+        stages: [manual]

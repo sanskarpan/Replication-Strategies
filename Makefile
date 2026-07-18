@@ -1,4 +1,5 @@
 .PHONY: build run test test-unit test-integration test-race tidy lint clean frontend-install frontend-dev cover bench fuzz fmt fmt-check vet typecheck ci
+.PHONY: benchstat
 
 # Coverage: race-enabled profile + per-function summary + HTML report
 cover:
@@ -10,6 +11,11 @@ cover:
 # Benchmarks (hot paths: store, vclock, quorum, anti-entropy)
 bench:
 	go test -bench=. -benchmem -run=^$$ ./...
+
+# Benchmark twice and compare with benchstat (install: go install golang.org/x/perf/cmd/benchstat@latest)
+benchstat:
+	go test -bench=. -benchmem -count=6 -run=^$$ ./... | tee /tmp/bench-new.txt
+	@echo "compare against a baseline with: benchstat /tmp/bench-base.txt /tmp/bench-new.txt"
 
 # Short native fuzz smoke run for each fuzz target
 fuzz:
