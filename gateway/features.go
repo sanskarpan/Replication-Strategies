@@ -1,12 +1,70 @@
 package gateway
 
 import (
+	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"replication-strategies/internal/simulation"
 )
+
+// handleRunScenarioYAML runs a user-supplied YAML scenario spec.
+func (s *Server) handleRunScenarioYAML(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	spec, err := simulation.LoadScenarioSpec(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scenario YAML: "+err.Error())
+		return
+	}
+	clusterID, err := s.orch.RunScenarioSpec(spec)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"cluster_id": clusterID, "scenario": spec.Name})
+}
+
+// handleExportReport returns a full JSON snapshot of a cluster (config, state, metrics,
+// convergence, invariants, scenario) for reproducible sharing/reporting.
+func (s *Server) handleExportReport(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	report, err := s.orch.ExportReport(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	report.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	w.Header().Set("Content-Disposition", "attachment; filename=\"cluster-report.json\"")
+	writeJSON(w, http.StatusOK, report)
+}
+
+// handleStrategyRace runs the same workload into clusters of different strategies and
+// returns a side-by-side comparison.
+func (s *Server) handleStrategyRace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Strategies []string `json:"strategies"`
+		NodeCount  int      `json:"node_count"`
+		Ops        int      `json:"ops"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.Strategies) == 0 {
+		req.Strategies = []string{"single_leader", "leaderless", "raft"}
+	}
+	report, err := s.orch.RunStrategyRace(req.Strategies, req.NodeCount, req.Ops)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
 
 // handleLinearizable checks the cluster's recorded op history against a linearizable
 // register model and reports any violating operation.
