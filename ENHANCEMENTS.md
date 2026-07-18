@@ -6,12 +6,20 @@ work for the Replication-Strategies simulator, produced from a four-track deep a
 
 Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL** 1–2 weeks.
 
-> **Status:** **§0 and §1 are fully shipped** (all bugs + all distributed-systems
-> features). Work is now proceeding through **§3 (engineering/infra/testing)**, **§2
-> (frontend/visualization)**, and **§4 (product/pedagogy)** in waves — each item
-> implemented with tests and end-to-end verification. Pure-content items that aren't
-> code (a recorded demo video, a hosted live deploy, a written blog series) are called
-> out as out-of-repo and left for manual follow-up.
+> **Status:** **§0, §1, §2, §3, and §4 are shipped** — all bugs, all distributed-systems
+> features, the frontend/visualization track, the engineering/infra/testing/observability
+> track, and the product/pedagogy track — each implemented with tests and end-to-end
+> verification (`go test -race ./...` green, 31/31 Playwright browser E2E, live HTTP smoke
+> tests of every endpoint).
+>
+> **Out-of-repo follow-ups (not code — cannot be produced/tested here):** a recorded
+> 60–90s demo video, a one-command hosted live deploy (Fly/Render — infra/secrets are the
+> user's to provision; the Dockerfiles + compose make it a `docker compose up`), a written
+> DDIA-mapped blog series, and i18n translation catalogues. The glossary, guided-lesson
+> content, and an in-app "about/landing" surface are shipped as data + endpoints; a
+> polished marketing landing page is presentation follow-up.
+>
+> **Wave PRs:** §1 (#110), §3 (#111), §2 (#119), §4 (this wave).
 
 ## Progress
 
