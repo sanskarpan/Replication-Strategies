@@ -24,7 +24,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: 1.22.x
+          go-version: 1.23.x
           cache: true
 
       - name: Build
@@ -63,7 +63,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: 1.22.x
+          go-version: 1.23.x
           cache: true
 
       - name: Run golangci-lint
@@ -82,7 +82,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: 1.22.x
+          go-version: 1.23.x
           cache: true
 
       - name: Install govulncheck
@@ -111,3 +111,48 @@ jobs:
 
       - name: Type check
         run: bunx tsc --noEmit
+
+  e2e:
+    name: Playwright browser E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 1.23.x
+          cache: true
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build server
+        run: go build -o /tmp/replsim-server ./cmd/server
+
+      - name: Install frontend deps + Playwright Chromium
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+
+      - name: Start backend + BFF and run E2E
+        working-directory: frontend
+        run: |
+          /tmp/replsim-server > /tmp/be.log 2>&1 &
+          sleep 3
+          curl -s -X POST localhost:8080/api/v1/simulation/reset || true
+          BACKEND=http://localhost:8080 bun server/bff.ts > /tmp/bff.log 2>&1 &
+          sleep 4
+          node e2e-run.mjs
+
+      - name: Upload E2E screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshots
+          path: /tmp/e2e-shots
+          if-no-files-found: ignore
