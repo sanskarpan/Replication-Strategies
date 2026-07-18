@@ -56,6 +56,13 @@ export interface NodeMetrics {
   read_latency_ms: number[];
   is_leader: boolean;
   is_online: boolean;
+  // Percentiles populated server-side (averages hide tail behaviour).
+  write_p50?: number;
+  write_p95?: number;
+  write_p99?: number;
+  read_p50?: number;
+  read_p95?: number;
+  read_p99?: number;
 }
 
 export interface LagSample {
@@ -115,6 +122,34 @@ export interface Scenario {
   strategy: ReplicationStrategy;
   description: string;
   node_count: number;
+}
+
+export interface KeyDivergence {
+  key: string;
+  values: Record<string, string>; // nodeID -> base64 value | "<tombstone>" | "<absent>"
+}
+
+export interface ConvergenceReport {
+  cluster_id: string;
+  converged: boolean;
+  keys: number;
+  diverged?: KeyDivergence[];
+  note?: string;
+}
+
+// Store snapshot returned by GET .../nodes/{nodeId}/store — map keyed by key.
+export type NodeStoreSnapshot = Record<string, KVEntry>;
+
+// Log snapshot returned by GET .../nodes/{nodeId}/log.
+export interface LogEntry {
+  index: number;
+  term: number;
+  key: string;
+  value: string; // base64
+  op: number | string; // numeric op enum from the backend
+  timestamp: number;
+  origin_id: string;
+  vclock?: VectorClock;
 }
 
 export interface WriteResult {

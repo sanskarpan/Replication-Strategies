@@ -286,3 +286,43 @@ func TestGateway_OpsEndpoints(t *testing.T) {
 	assert.Contains(t, body, "replsim_clusters ")
 	assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
 }
+
+// §4: presets, CAP classification, challenge grading, and scenario verdicts.
+func TestGateway_PresetsAndCAPAndChallenge(t *testing.T) {
+	ts, _ := newTestServer(t)
+	// Presets list + create-from-preset.
+	code, body := doJSON(t, "GET", ts.URL+"/api/v1/presets", "")
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, "Cassandra")
+
+	code, body = doJSON(t, "POST", ts.URL+"/api/v1/presets/etcd/create", "")
+	require.Equal(t, http.StatusCreated, code, body)
+	var st map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &st))
+	cid := st["id"].(string)
+
+	// CAP classification for the etcd (raft) preset -> CP.
+	code, body = doJSON(t, "GET", ts.URL+"/api/v1/clusters/"+cid+"/cap", "")
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, "CP")
+
+	// Challenge grading against a strict SLA on a strong cluster.
+	code, body = doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/challenge",
+		`{"max_stale_read_prob":0,"min_overlap":1,"max_write_latency_ms":1000}`)
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, "score")
+}
+
+// §4: glossary + guided lessons content endpoints.
+func TestGateway_GlossaryAndLessons(t *testing.T) {
+	ts, _ := newTestServer(t)
+	code, body := doJSON(t, "GET", ts.URL+"/api/v1/glossary", "")
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, "Quorum")
+	assert.Contains(t, body, "DDIA")
+
+	code, body = doJSON(t, "GET", ts.URL+"/api/v1/lessons", "")
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, "predict")
+	assert.Contains(t, body, "reveal")
+}

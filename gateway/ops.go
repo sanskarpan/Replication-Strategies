@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bufio"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -123,12 +125,19 @@ func slogMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// statusWriter captures the response status + byte count for structured logging.
+// statusWriter captures the response status + byte count for structured logging. It
+// must forward Hijacker/Flusher so it never hides those interfaces from the /ws upgrade
+// or streaming handlers (a regression guarded by these compile-time assertions).
 type statusWriter struct {
 	http.ResponseWriter
 	status int
 	bytes  int
 }
+
+var (
+	_ http.Hijacker = (*statusWriter)(nil)
+	_ http.Flusher  = (*statusWriter)(nil)
+)
 
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
@@ -139,4 +148,22 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.bytes += n
 	return n, err
+}
+
+// Hijack forwards to the underlying ResponseWriter so WebSocket upgrades (the /ws event
+// stream) still work through the logging middleware. Without this passthrough the
+// wrapper hides the http.Hijacker interface and the upgrade fails.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
+	}
+	return hj.Hijack()
+}
+
+// Flush forwards to the underlying ResponseWriter for streaming responses.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

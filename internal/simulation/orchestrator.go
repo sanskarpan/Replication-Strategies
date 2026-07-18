@@ -117,13 +117,15 @@ type Orchestrator struct {
 	clusters    map[string]*Cluster
 	bus         *events.EventBus
 	maxClusters int // 0 = unlimited
+	scenarios   *scenarioTracker
 }
 
 // NewOrchestrator creates a new Orchestrator backed by the given EventBus.
 func NewOrchestrator(bus *events.EventBus) *Orchestrator {
 	return &Orchestrator{
-		clusters: make(map[string]*Cluster),
-		bus:      bus,
+		clusters:  make(map[string]*Cluster),
+		bus:       bus,
+		scenarios: newScenarioTracker(),
 	}
 }
 
