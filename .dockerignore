@@ -1,0 +1,34 @@
+# Dependencies (reinstalled inside the image)
+node_modules
+frontend/node_modules
+
+# Version control
+.git
+.gitignore
+
+# Logs
+*.log
+
+# Go test coverage output
+coverage.out
+
+# Temp / scratch
+/tmp
+tmp
+
+# Playwright / e2e artifacts and screenshots
+screenshots
+e2e-shots
+frontend/playwright-report
+frontend/test-results
+
+# OS / editor cruft
+.DS_Store
+.idea
+.vscode
+
+# Docker + compose files (not needed inside build context)
+Dockerfile
+frontend/Dockerfile
+docker-compose.yml
+.dockerignore
