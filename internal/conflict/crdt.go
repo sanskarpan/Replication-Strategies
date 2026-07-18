@@ -157,6 +157,13 @@ func mergeCRDT(localVal, remoteVal []byte) ([]byte, string, bool) {
 		}
 		out, _ := json.Marshal(a.Merge(&b))
 		return out, "lwwmap_merge", true
+	case RGAType:
+		var a, b RGA
+		if json.Unmarshal(localVal, &a) != nil || json.Unmarshal(remoteVal, &b) != nil {
+			return nil, "", false
+		}
+		out, _ := json.Marshal(a.Merge(&b))
+		return out, "rga_merge", true
 	}
 	return nil, "", false
 }
