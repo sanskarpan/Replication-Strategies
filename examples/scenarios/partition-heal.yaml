@@ -1,0 +1,50 @@
+# Custom narrated scenario: partition a leaderless cluster, write on both sides,
+# then heal and let anti-entropy reconcile the divergent replicas.
+#
+# Load with simulation.LoadScenarioSpec(data) and run via
+# Orchestrator.RunScenarioSpec(spec). Node references ("n0", "n1", ...) map to
+# the cluster's NodeIDs by index.
+name: PartitionHealDemo
+strategy: leaderless
+node_count: 5
+quorum_n: 5
+quorum_w: 3
+quorum_r: 2
+steps:
+  - action: narrate
+    narration: "steady state: writing a value under a healthy 5-node quorum"
+  - action: write
+    node: n0
+    key: demo-key
+    value: initial-value
+  - action: sleep
+    ms: 100
+
+  - action: partition
+    group: [n0, n1]
+    group2: [n2, n3, n4]
+    narration: "network splits the cluster 2 + 3"
+  - action: sleep
+    ms: 50
+
+  - action: write
+    node: n0
+    key: demo-key
+    value: from-minority-side
+    narration: "the minority side takes a write while partitioned"
+  - action: write
+    node: n2
+    key: demo-key
+    value: from-majority-side
+    narration: "the majority side takes a conflicting write"
+  - action: sleep
+    ms: 100
+
+  - action: heal
+    narration: "partition heals; the two sides can talk again"
+  - action: sleep
+    ms: 50
+  - action: anti_entropy
+    narration: "anti-entropy compares replicas and reconciles the divergence"
+  - action: sleep
+    ms: 100
