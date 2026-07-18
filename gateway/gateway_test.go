@@ -218,3 +218,48 @@ func TestGateway_Convergence(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(body), &rep))
 	assert.Equal(t, true, rep["converged"])
 }
+
+// §1: the new correctness-checker, anti-entropy, reconfigure, and demo endpoints route.
+func TestGateway_LinearizableAndInvariants(t *testing.T) {
+	ts, _ := newTestServer(t)
+	cid := createCluster(t, ts.URL, `{"strategy":"single_leader","node_count":3,"replication_mode":"sync"}`)
+	code, _ := doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/write", `{"key":"k","value":"v","client_id":"c"}`)
+	require.Equal(t, http.StatusOK, code)
+	code, body := doJSON(t, "GET", ts.URL+"/api/v1/clusters/"+cid+"/linearizable", "")
+	require.Equal(t, http.StatusOK, code, body)
+	var lin map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &lin))
+	assert.Equal(t, true, lin["linearizable"])
+
+	code, body = doJSON(t, "GET", ts.URL+"/api/v1/clusters/"+cid+"/invariants", "")
+	require.Equal(t, http.StatusOK, code, body)
+	var inv map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &inv))
+	assert.Equal(t, true, inv["ok"])
+}
+
+func TestGateway_AntiEntropyAndReconfigure(t *testing.T) {
+	ts, _ := newTestServer(t)
+	cid := createCluster(t, ts.URL, `{"strategy":"leaderless","node_count":3,"quorum_w":2,"quorum_r":2}`)
+	code, _ := doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/write", `{"key":"k","value":"v","client_id":"c"}`)
+	require.Equal(t, http.StatusOK, code)
+	time.Sleep(150 * time.Millisecond)
+
+	code, body := doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/anti-entropy", "")
+	require.Equal(t, http.StatusOK, code, body)
+
+	code, body = doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/reconfigure/add-node", "")
+	require.Equal(t, http.StatusOK, code, body)
+	var rc map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(body), &rc))
+	assert.Equal(t, true, rc["overlap_held"])
+}
+
+func TestGateway_PrimitiveDemos(t *testing.T) {
+	ts, _ := newTestServer(t)
+	for _, path := range []string{"2pc?crash=true", "mvcc", "wal?mode=buffered", "swim", "paxos", "detsim?seed=7"} {
+		code, body := doJSON(t, "GET", ts.URL+"/api/v1/demos/"+path, "")
+		require.Equal(t, http.StatusOK, code, "demo %s: %s", path, body)
+		assert.NotEmpty(t, body)
+	}
+}
