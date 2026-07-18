@@ -1,0 +1,1773 @@
+openapi: 3.0.3
+info:
+  title: Replication Strategies API
+  version: "1.0.0"
+  description: |
+    REST API for the Replication Strategies simulator. The gateway wraps a
+    simulation `Orchestrator` that provisions and drives in-memory clusters
+    running one of four replication strategies (`single_leader`,
+    `multi_leader`, `leaderless`, `raft`).
+
+    The API lets you:
+      - manage the global simulation (start / reset / inspect / metrics),
+      - create and manage clusters (CRUD, config, correctness checkers),
+      - issue writes, reads, deletes and batched writes,
+      - manage nodes (add / remove / pause / resume / clock-skew / inspect),
+      - inject and heal network faults (partitions, latency, drop),
+      - run consistency-guarantee demos and standalone primitive demos,
+      - list and run built-in teaching scenarios.
+
+    All request and response bodies are JSON unless noted. Errors are returned
+    as an `{ "error": "..." }` object with an appropriate HTTP status code.
+
+    A WebSocket event stream is exposed at `GET /ws` (outside `/api/v1`) for
+    live simulation events; it is not described by this OpenAPI document.
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Simulation
+    description: Global simulation lifecycle and metrics
+  - name: Clusters
+    description: Cluster CRUD, state and configuration
+  - name: Correctness
+    description: Convergence, linearizability, invariants and anti-entropy checkers
+  - name: Data
+    description: Writes, reads, deletes and batched writes
+  - name: Nodes
+    description: Node lifecycle and inspection
+  - name: Network
+    description: Network fault injection (partitions, latency, drop)
+  - name: Consistency Demos
+    description: Cluster-scoped consistency-guarantee demonstrations
+  - name: Scenarios
+    description: Built-in teaching scenarios
+  - name: Primitive Demos
+    description: Standalone algorithm demonstrations (no cluster required)
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Simulation lifecycle
+  # ---------------------------------------------------------------------------
+  /api/v1/simulation/start:
+    post:
+      tags: [Simulation]
+      summary: Start the simulation by creating a cluster
+      description: |
+        Creates a new cluster from the supplied configuration and returns its
+        initial state. Equivalent in effect to `POST /api/v1/clusters`.
+      operationId: startSimulation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterConfig'
+      responses:
+        '201':
+          description: Cluster created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/simulation/reset:
+    post:
+      tags: [Simulation]
+      summary: Reset the simulation
+      description: Deletes every active cluster.
+      operationId: resetSimulation
+      responses:
+        '200':
+          description: Simulation reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: reset
+
+  /api/v1/simulation/state:
+    get:
+      tags: [Simulation]
+      summary: Get the state of all clusters
+      operationId: getSimulationState
+      responses:
+        '200':
+          description: State snapshot of every active cluster
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clusters:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ClusterState'
+
+  /api/v1/simulation/metrics:
+    get:
+      tags: [Simulation]
+      summary: Get per-cluster metrics
+      description: Returns a map of cluster ID to that cluster's metrics snapshot.
+      operationId: getSimulationMetrics
+      responses:
+        '200':
+          description: Metrics keyed by cluster ID
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ClusterMetrics'
+
+  # ---------------------------------------------------------------------------
+  # Clusters
+  # ---------------------------------------------------------------------------
+  /api/v1/clusters:
+    post:
+      tags: [Clusters]
+      summary: Create a cluster
+      operationId: createCluster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterConfig'
+      responses:
+        '201':
+          description: Cluster created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Clusters]
+      summary: List all clusters
+      operationId: listClusters
+      responses:
+        '200':
+          description: Array of cluster states
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClusterState'
+
+  /api/v1/clusters/{id}:
+    delete:
+      tags: [Clusters]
+      summary: Delete a cluster
+      operationId: deleteCluster
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '204':
+          description: Cluster deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/state:
+    get:
+      tags: [Clusters]
+      summary: Get a cluster's state
+      operationId: getClusterState
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Cluster state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterState'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/convergence:
+    get:
+      tags: [Correctness]
+      summary: Check convergence
+      description: Reports whether all online replicas agree on every key.
+      operationId: getConvergence
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Convergence report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConvergenceReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/suspicion:
+    get:
+      tags: [Nodes]
+      summary: Get phi-accrual suspicion levels
+      description: Reports each node's phi-accrual failure-suspicion level.
+      operationId: getSuspicion
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Suspicion levels per node
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  threshold:
+                    type: number
+                    format: double
+                    description: Phi level above which a node is treated as failed.
+                    example: 8.0
+                  nodes:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/NodeSuspicion'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/placement:
+    get:
+      tags: [Clusters]
+      summary: Get the preference list for a key
+      description: Returns the consistent-hashing preference list for a key.
+      operationId: getPlacement
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - name: key
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Key to place on the ring.
+        - name: n
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 3
+          description: Number of replicas to return.
+      responses:
+        '200':
+          description: Preference list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  preference_list:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/clusters/{id}/conflicts:
+    get:
+      tags: [Clusters]
+      summary: List pending conflicts
+      description: Lists parked (manual) multi-leader conflicts awaiting a choice.
+      operationId: listConflicts
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Pending conflicts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conflicts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PendingConflict'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/conflicts/resolve:
+    post:
+      tags: [Clusters]
+      summary: Resolve a pending conflict
+      operationId: resolveConflict
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveConflictRequest'
+      responses:
+        '200':
+          description: Conflict resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: resolved
+                  key:
+                    type: string
+                  choice:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/clusters/{id}/config:
+    patch:
+      tags: [Clusters]
+      summary: Patch cluster configuration
+      description: |
+        Applies supported config patches to a live cluster. Currently
+        `replication_mode` is supported and is only valid for `single_leader`
+        clusters.
+      operationId: patchClusterConfig
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterConfigPatch'
+      responses:
+        '200':
+          description: Updated cluster state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/linearizable:
+    get:
+      tags: [Correctness]
+      summary: Check linearizability
+      description: Checks the recorded op history against a linearizable register model.
+      operationId: checkLinearizable
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Linearizability report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinearizabilityReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/invariants:
+    get:
+      tags: [Correctness]
+      summary: Check invariants
+      description: Reports the always-on invariants (convergence + linearizability).
+      operationId: checkInvariants
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Invariant report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvariantReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/anti-entropy:
+    post:
+      tags: [Correctness]
+      summary: Run an anti-entropy round
+      description: |
+        Runs a Merkle-tree anti-entropy round and reports the divergent keys
+        exchanged plus whether the cluster converged.
+      operationId: runAntiEntropy
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Anti-entropy report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AntiEntropyReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/reconfigure/add-node:
+    post:
+      tags: [Correctness]
+      summary: Safely add a node (leaderless)
+      description: |
+        Performs a safe two-phase leaderless membership change (no
+        quorum-overlap gap) and reports the transition.
+      operationId: safeAddNode
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Reconfigure report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconfigureReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ---------------------------------------------------------------------------
+  # Writes / reads
+  # ---------------------------------------------------------------------------
+  /api/v1/clusters/{id}/write:
+    post:
+      tags: [Data]
+      summary: Write a key
+      operationId: write
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WriteRequest'
+      responses:
+        '200':
+          description: Write result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/clusters/{id}/read:
+    get:
+      tags: [Data]
+      summary: Read a key
+      operationId: read
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: client_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: node_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Target node; defaults to the leader / first node.
+      responses:
+        '200':
+          description: Read result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/kv:
+    delete:
+      tags: [Data]
+      summary: Delete a key
+      operationId: deleteKey
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: client_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: node_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Key deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+                  key:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/clusters/{id}/write-batch:
+    post:
+      tags: [Data]
+      summary: Write a batch of keys
+      description: |
+        Writes multiple entries. When `atomic` is true the batch is applied
+        all-or-nothing on a single-leader cluster; otherwise each entry is
+        written independently and a per-entry result/error is returned.
+      operationId: writeBatch
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchWriteRequest'
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AtomicBatchResult'
+                  - $ref: '#/components/schemas/NonAtomicBatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  # ---------------------------------------------------------------------------
+  # Nodes
+  # ---------------------------------------------------------------------------
+  /api/v1/clusters/{id}/nodes:
+    post:
+      tags: [Nodes]
+      summary: Add a node
+      operationId: addNode
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '201':
+          description: Node added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeStatus'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/clusters/{id}/nodes/{nodeId}:
+    delete:
+      tags: [Nodes]
+      summary: Remove a node
+      operationId: removeNode
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '204':
+          description: Node removed
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/nodes/{nodeId}/pause:
+    post:
+      tags: [Nodes]
+      summary: Pause a node
+      operationId: pauseNode
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Node paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/nodes/{nodeId}/resume:
+    post:
+      tags: [Nodes]
+      summary: Resume a node
+      operationId: resumeNode
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Node resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/nodes/{nodeId}/clock-skew:
+    post:
+      tags: [Nodes]
+      summary: Set a node's clock skew
+      description: Injects a physical-clock offset (ms) on a node.
+      operationId: setClockSkew
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClockSkewRequest'
+      responses:
+        '200':
+          description: Clock skew set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  node:
+                    type: string
+                  skew_ms:
+                    type: integer
+                    format: int64
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/nodes/{nodeId}/log:
+    get:
+      tags: [Nodes]
+      summary: Get a node's replication log
+      operationId: getNodeLog
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Log snapshot
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogEntry'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/nodes/{nodeId}/store:
+    get:
+      tags: [Nodes]
+      summary: Get a node's key-value store
+      operationId: getNodeStore
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Store snapshot keyed by key
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/KVEntry'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------------------
+  # Network fault injection
+  # ---------------------------------------------------------------------------
+  /api/v1/clusters/{id}/network/partition:
+    post:
+      tags: [Network]
+      summary: Inject a network partition
+      description: Partitions the cluster into two disjoint groups of nodes.
+      operationId: injectPartition
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartitionRequest'
+      responses:
+        '201':
+          description: Partition created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  partition_id:
+                    type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/clusters/{id}/network/partition/{partId}:
+    delete:
+      tags: [Network]
+      summary: Heal a network partition
+      operationId: healPartition
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - name: partId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Partition healed
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/network/latency:
+    post:
+      tags: [Network]
+      summary: Set one-way link latency
+      operationId: setLatency
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LatencyRequest'
+      responses:
+        '200':
+          description: Latency set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/network/drop:
+    post:
+      tags: [Network]
+      summary: Set packet-drop rate on a link
+      operationId: setDrop
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropRequest'
+      responses:
+        '200':
+          description: Drop rate set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/network/faults:
+    delete:
+      tags: [Network]
+      summary: Clear all network faults
+      description: Removes all latency, drop-rate and partition overrides.
+      operationId: clearFaults
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Faults cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------------------
+  # Consistency guarantee demos
+  # ---------------------------------------------------------------------------
+  /api/v1/clusters/{id}/demo/read-your-writes:
+    post:
+      tags: [Consistency Demos]
+      summary: Read-your-writes demo
+      description: |
+        Writes on one node and immediately reads the write back from a lagging
+        replica, so the demo shows a violation when it occurs.
+      operationId: demoReadYourWrites
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Read-your-writes demo result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadYourWritesReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/clusters/{id}/demo/monotonic-reads:
+    post:
+      tags: [Consistency Demos]
+      summary: Monotonic-reads demo
+      description: |
+        After the client sees a newer value on a fresh node, a read from a
+        lagging replica may return the older value — reads going backward.
+      operationId: demoMonotonicReads
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Monotonic-reads demo result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonotonicReadsReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/clusters/{id}/demo/consistent-prefix:
+    post:
+      tags: [Consistency Demos]
+      summary: Consistent-prefix demo
+      description: |
+        Writes an ordered sequence and reads it back, reporting the observed
+        order. Single-leader guarantees the prefix; multi-leader reordering can
+        break it.
+      operationId: demoConsistentPrefix
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+      responses:
+        '200':
+          description: Consistent-prefix demo result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsistentPrefixReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------------------
+  # Scenarios
+  # ---------------------------------------------------------------------------
+  /api/v1/scenarios:
+    get:
+      tags: [Scenarios]
+      summary: List built-in scenarios
+      operationId: listScenarios
+      responses:
+        '200':
+          description: Scenario catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scenario'
+
+  /api/v1/scenarios/{name}/run:
+    post:
+      tags: [Scenarios]
+      summary: Run a scenario
+      description: Provisions and runs the named scenario, returning the resulting cluster state.
+      operationId: runScenario
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Scenario name (e.g. `ReplicationLag`).
+      responses:
+        '201':
+          description: Scenario cluster created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterState'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------------------
+  # Standalone primitive demos
+  # ---------------------------------------------------------------------------
+  /api/v1/demos/2pc:
+    get:
+      tags: [Primitive Demos]
+      summary: Two-phase commit demo
+      operationId: demoTwoPC
+      parameters:
+        - name: crash
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: When `true`, crashes the coordinator after prepare.
+      responses:
+        '200':
+          description: 2PC demo report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoPCDemoReport'
+
+  /api/v1/demos/mvcc:
+    get:
+      tags: [Primitive Demos]
+      summary: MVCC snapshot-read demo
+      operationId: demoMVCC
+      responses:
+        '200':
+          description: MVCC demo report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MVCCDemoReport'
+
+  /api/v1/demos/wal:
+    get:
+      tags: [Primitive Demos]
+      summary: Write-ahead-log durability demo
+      operationId: demoWAL
+      parameters:
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            default: buffered
+            enum: [buffered, fsync]
+          description: Durability mode.
+      responses:
+        '200':
+          description: WAL demo report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WALDemoReport'
+
+  /api/v1/demos/swim:
+    get:
+      tags: [Primitive Demos]
+      summary: SWIM membership demo
+      operationId: demoSWIM
+      responses:
+        '200':
+          description: SWIM demo report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SWIMDemoReport'
+
+  /api/v1/demos/paxos:
+    get:
+      tags: [Primitive Demos]
+      summary: Paxos single-decree demo
+      operationId: demoPaxos
+      responses:
+        '200':
+          description: Paxos demo report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaxosDemoReport'
+
+  /api/v1/demos/detsim:
+    get:
+      tags: [Primitive Demos]
+      summary: Deterministic-simulation demo
+      operationId: demoDetSim
+      parameters:
+        - name: seed
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            default: 42
+          description: RNG seed; the same seed reproduces the run.
+      responses:
+        '200':
+          description: Deterministic-simulation demo report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetSimDemoReport'
+
+# ---------------------------------------------------------------------------
+components:
+  parameters:
+    ClusterId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Cluster ID (UUID).
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Node ID.
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Operation conflict (e.g. unmet quorum, wrong target, paused node)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    # -----------------------------------------------------------------------
+    # Common
+    # -----------------------------------------------------------------------
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    StatusMessage:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ReplicationStrategy:
+      type: string
+      enum: [single_leader, multi_leader, leaderless, raft]
+
+    ReplicationMode:
+      type: string
+      enum: [async, sync, semi_sync]
+
+    ConflictResolver:
+      type: string
+      enum: [lww, vector_clock, crdt, manual]
+
+    # -----------------------------------------------------------------------
+    # Cluster config & state
+    # -----------------------------------------------------------------------
+    ClusterConfig:
+      type: object
+      description: Parameters for creating a new cluster.
+      properties:
+        strategy:
+          $ref: '#/components/schemas/ReplicationStrategy'
+        node_count:
+          type: integer
+          description: Number of nodes. Defaults to 3 (5 for leaderless) when < 1.
+          example: 3
+        replication_mode:
+          $ref: '#/components/schemas/ReplicationMode'
+        conflict_resolver:
+          $ref: '#/components/schemas/ConflictResolver'
+        quorum_n:
+          type: integer
+          description: Replication factor N (leaderless).
+        quorum_w:
+          type: integer
+          description: Write quorum W (leaderless).
+        quorum_r:
+          type: integer
+          description: Read quorum R (leaderless).
+        regions:
+          type: integer
+          description: Split nodes across N regions with inter-region latency.
+        inter_region_latency_ms:
+          type: integer
+        consistency_level:
+          type: string
+          enum: [quorum, local_quorum, each_quorum]
+          description: Region-aware quorum (leaderless).
+        read_repair_mode:
+          type: string
+          enum: [async, sync, digest]
+        sloppy_quorum:
+          type: boolean
+          description: Enable sloppy quorum with hinted handoff (default on).
+      required: [strategy]
+
+    ClusterConfigPatch:
+      type: object
+      description: |
+        Supported live-config patches. Only `replication_mode` is applied
+        (single-leader clusters only); other keys are ignored.
+      properties:
+        replication_mode:
+          $ref: '#/components/schemas/ReplicationMode'
+
+    ClusterState:
+      type: object
+      description: JSON-serialisable snapshot of a cluster.
+      properties:
+        id:
+          type: string
+        config:
+          $ref: '#/components/schemas/ClusterConfig'
+        node_ids:
+          type: array
+          items:
+            type: string
+        leader_id:
+          type: string
+        nodes:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/NodeStatus'
+        metrics:
+          $ref: '#/components/schemas/ClusterMetrics'
+        created:
+          type: string
+          format: date-time
+        partitions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Partition'
+        dropped_messages:
+          type: integer
+          format: int64
+          description: Count of back-pressure drops (full queues).
+        node_regions:
+          type: object
+          additionalProperties:
+            type: integer
+          description: nodeID -> region index (geo).
+      required: [id, config, node_ids, nodes, metrics, created, partitions]
+
+    ClusterMetrics:
+      type: object
+      description: Metrics snapshot for a cluster (shape depends on strategy).
+      additionalProperties: true
+
+    Partition:
+      type: object
+      description: A network partition between two groups of nodes.
+      properties:
+        id:
+          type: string
+        group_a:
+          type: object
+          additionalProperties:
+            type: boolean
+        group_b:
+          type: object
+          additionalProperties:
+            type: boolean
+
+    NodeStatus:
+      type: object
+      properties:
+        id:
+          type: string
+        cluster_id:
+          type: string
+        strategy:
+          $ref: '#/components/schemas/ReplicationStrategy'
+        role:
+          type: string
+        state:
+          type: string
+        commit_index:
+          type: integer
+          format: int64
+        last_applied:
+          type: integer
+          format: int64
+        leader_id:
+          type: string
+        peers:
+          type: array
+          items:
+            type: string
+        lag:
+          type: integer
+          format: int64
+
+    NodeSuspicion:
+      type: object
+      properties:
+        phi:
+          type: number
+          format: double
+        suspected:
+          type: boolean
+
+    LogEntry:
+      type: object
+      description: One entry in a node's replication log.
+      additionalProperties: true
+
+    KVEntry:
+      type: object
+      description: A stored key-value entry with its causal metadata.
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+          format: byte
+          description: Base64-encoded value bytes.
+        vclock:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+          description: Vector clock (nodeID -> counter).
+        timestamp:
+          type: integer
+          format: int64
+          description: UnixNano write time.
+        node_id:
+          type: string
+        tombstone:
+          type: boolean
+        version:
+          type: integer
+          format: int64
+
+    # -----------------------------------------------------------------------
+    # Write / read
+    # -----------------------------------------------------------------------
+    WriteRequest:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+        client_id:
+          type: string
+        target_node_id:
+          type: string
+          description: Target node; defaults to the leader / first node.
+      required: [key]
+
+    BatchWriteRequest:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/WriteRequest'
+        client_id:
+          type: string
+        atomic:
+          type: boolean
+          description: All-or-nothing on a single-leader cluster.
+      required: [entries]
+
+    WriteResult:
+      type: object
+      properties:
+        entry:
+          $ref: '#/components/schemas/KVEntry'
+        node_id:
+          type: string
+
+    ReadResult:
+      type: object
+      properties:
+        entry:
+          $ref: '#/components/schemas/KVEntry'
+        node_id:
+          type: string
+
+    AtomicBatchResult:
+      type: object
+      properties:
+        atomic:
+          type: boolean
+          example: true
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/KVEntry'
+
+    NonAtomicBatchResult:
+      type: object
+      properties:
+        results:
+          type: array
+          description: Per-entry WriteResult on success or an error object on failure.
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/WriteResult'
+              - $ref: '#/components/schemas/BatchEntryError'
+      required: [results]
+
+    BatchEntryError:
+      type: object
+      properties:
+        error:
+          type: string
+        key:
+          type: string
+
+    # -----------------------------------------------------------------------
+    # Conflicts
+    # -----------------------------------------------------------------------
+    PendingConflict:
+      type: object
+      properties:
+        node_id:
+          type: string
+        key:
+          type: string
+        local_value:
+          type: string
+        remote_value:
+          type: string
+
+    ResolveConflictRequest:
+      type: object
+      properties:
+        node_id:
+          type: string
+        key:
+          type: string
+        choice:
+          type: string
+          enum: [local, remote]
+      required: [node_id, key, choice]
+
+    # -----------------------------------------------------------------------
+    # Node / network requests
+    # -----------------------------------------------------------------------
+    ClockSkewRequest:
+      type: object
+      properties:
+        ms:
+          type: integer
+          format: int64
+          description: Physical-clock offset in milliseconds.
+      required: [ms]
+
+    PartitionRequest:
+      type: object
+      properties:
+        group_a:
+          type: array
+          items:
+            type: string
+        group_b:
+          type: array
+          items:
+            type: string
+      required: [group_a, group_b]
+
+    LatencyRequest:
+      type: object
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        ms:
+          type: integer
+      required: [from, to, ms]
+
+    DropRequest:
+      type: object
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        rate:
+          type: number
+          format: double
+          description: Packet-drop probability in [0, 1].
+      required: [from, to, rate]
+
+    # -----------------------------------------------------------------------
+    # Correctness reports
+    # -----------------------------------------------------------------------
+    ConvergenceReport:
+      type: object
+      properties:
+        cluster_id:
+          type: string
+        converged:
+          type: boolean
+        keys:
+          type: integer
+        diverged:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyDivergence'
+        note:
+          type: string
+
+    KeyDivergence:
+      type: object
+      properties:
+        key:
+          type: string
+        values:
+          type: object
+          additionalProperties:
+            type: string
+          description: nodeID -> value | "<tombstone>" | "<absent>".
+
+    LinearizabilityReport:
+      type: object
+      properties:
+        cluster_id:
+          type: string
+        ops:
+          type: integer
+        linearizable:
+          type: boolean
+        violation:
+          $ref: '#/components/schemas/ViolationOp'
+        note:
+          type: string
+
+    ViolationOp:
+      type: object
+      properties:
+        client_id:
+          type: string
+        kind:
+          type: string
+          enum: [read, write]
+        key:
+          type: string
+        value:
+          type: string
+
+    InvariantReport:
+      type: object
+      properties:
+        cluster_id:
+          type: string
+        converged:
+          type: boolean
+        linearizable:
+          type: boolean
+        ok:
+          type: boolean
+        violations:
+          type: array
+          items:
+            type: string
+
+    AntiEntropyReport:
+      type: object
+      properties:
+        cluster_id:
+          type: string
+        total_keys:
+          type: integer
+        divergent_keys:
+          type: array
+          items:
+            type: string
+        reconciled:
+          type: integer
+        converged_after:
+          type: boolean
+
+    ReconfigureReport:
+      type: object
+      properties:
+        cluster_id:
+          type: string
+        added_node:
+          type: string
+        old_quorum:
+          type: array
+          items:
+            type: integer
+          minItems: 3
+          maxItems: 3
+          description: "[N, W, R]"
+        new_quorum:
+          type: array
+          items:
+            type: integer
+          minItems: 3
+          maxItems: 3
+          description: "[N, W, R]"
+        overlap_held:
+          type: boolean
+        reconciled:
+          type: integer
+        phases:
+          type: array
+          items:
+            type: string
+
+    # -----------------------------------------------------------------------
+    # Consistency-demo reports
+    # -----------------------------------------------------------------------
+    ReadYourWritesReport:
+      type: object
+      properties:
+        client_id:
+          type: string
+        write_key:
+          type: string
+        write_value:
+          type: string
+        write_node:
+          type: string
+        read_node:
+          type: string
+        write_result:
+          $ref: '#/components/schemas/WriteResult'
+        read_result:
+          $ref: '#/components/schemas/ReadResult'
+        consistent:
+          type: boolean
+        explanation:
+          type: string
+
+    MonotonicReadsReport:
+      type: object
+      properties:
+        client_id:
+          type: string
+        read_node1:
+          type: string
+        read_node2:
+          type: string
+        read1:
+          $ref: '#/components/schemas/ReadResult'
+        read2:
+          $ref: '#/components/schemas/ReadResult'
+        monotonic:
+          type: boolean
+        explanation:
+          type: string
+
+    ConsistentPrefixReport:
+      type: object
+      properties:
+        client_id:
+          type: string
+        write_node:
+          type: string
+        read_node:
+          type: string
+        sequence:
+          type: array
+          items:
+            type: string
+        observed:
+          type: string
+        writes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WriteResult'
+        consistent:
+          type: boolean
+        explanation:
+          type: string
+
+    # -----------------------------------------------------------------------
+    # Scenarios & primitive demos
+    # -----------------------------------------------------------------------
+    Scenario:
+      type: object
+      properties:
+        name:
+          type: string
+        strategy:
+          $ref: '#/components/schemas/ReplicationStrategy'
+        description:
+          type: string
+        node_count:
+          type: integer
+
+    TwoPCDemoReport:
+      type: object
+      properties:
+        crash:
+          type: boolean
+        committed:
+          type: boolean
+        blocked:
+          type: boolean
+        recovered:
+          type: boolean
+        final_values:
+          type: object
+          additionalProperties:
+            type: string
+        narrative:
+          type: array
+          items:
+            type: string
+
+    MVCCDemoReport:
+      type: object
+      properties:
+        narrative:
+          type: array
+          items:
+            type: string
+        read_at_5_found:
+          type: boolean
+        read_at_15:
+          type: string
+        read_at_25:
+          type: string
+        snapshot_stable:
+          type: boolean
+
+    WALDemoReport:
+      type: object
+      properties:
+        mode:
+          type: string
+        acked:
+          type: integer
+        durable_before_crash:
+          type: integer
+        lost:
+          type: integer
+        narrative:
+          type: array
+          items:
+            type: string
+
+    SWIMDemoReport:
+      type: object
+      properties:
+        narrative:
+          type: array
+          items:
+            type: string
+        final_alive:
+          type: array
+          items:
+            type: string
+        final_suspect:
+          type: array
+          items:
+            type: string
+        final_dead:
+          type: array
+          items:
+            type: string
+
+    PaxosDemoReport:
+      type: object
+      properties:
+        narrative:
+          type: array
+          items:
+            type: string
+        first_chosen:
+          type: string
+        second_proposed:
+          type: string
+        second_chosen:
+          type: string
+        safety_held:
+          type: boolean
+
+    DetSimDemoReport:
+      type: object
+      properties:
+        seed:
+          type: integer
+          format: int64
+        run1:
+          type: array
+          items:
+            type: integer
+        run2:
+          type: array
+          items:
+            type: integer
+        reproducible:
+          type: boolean
+        narrative:
+          type: array
+          items:
+            type: string
