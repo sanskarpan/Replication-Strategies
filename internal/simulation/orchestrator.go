@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"replication-strategies/internal/checker"
 	"replication-strategies/internal/conflict"
 	"replication-strategies/internal/events"
 	"replication-strategies/internal/failure"
@@ -29,6 +30,10 @@ type ClusterConfig struct {
 	// Geo-replication: split nodes across N regions with inter-region latency.
 	Regions              int `json:"regions,omitempty"`
 	InterRegionLatencyMs int `json:"inter_region_latency_ms,omitempty"`
+	// Leaderless tunables (optional): region-aware quorum + read-repair strategy.
+	ConsistencyLevel string `json:"consistency_level,omitempty"` // quorum|local_quorum|each_quorum
+	ReadRepairMode   string `json:"read_repair_mode,omitempty"`  // async|sync|digest
+	SloppyQuorum     *bool  `json:"sloppy_quorum,omitempty"`     // default on
 }
 
 // Cluster holds all runtime state for one simulated cluster.
@@ -43,9 +48,17 @@ type Cluster struct {
 	Metrics     *metrics.ClusterMetrics  `json:"-"`
 	detector    *failure.Detector        `json:"-"` // phi-accrual failure detector
 	NodeRegions map[string]int           `json:"-"` // nodeID -> region index (geo)
+	history     *checker.History         `json:"-"` // op history for the linearizability checker
 	ctx         context.Context
 	cancel      context.CancelFunc
 	created     time.Time
+}
+
+// recordOp appends a client operation to the cluster's linearizability history.
+func (c *Cluster) recordOp(op checker.Op) {
+	if c.history != nil {
+		c.history.Record(op)
+	}
 }
 
 // Mu exposes the cluster mutex for external packages that need to lock it.
@@ -154,6 +167,7 @@ func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
 		Fabric:   fabric,
 		Metrics:  clusterMetrics,
 		detector: failure.NewDetector(),
+		history:  &checker.History{},
 		ctx:      ctx,
 		cancel:   cancel,
 		created:  time.Now(),
@@ -335,9 +349,16 @@ func (o *Orchestrator) createMultiLeaderCluster(cluster *Cluster, cfg ClusterCon
 }
 
 func (o *Orchestrator) createLeaderlessCluster(cluster *Cluster, cfg ClusterConfig) error {
-	N := cfg.NodeCount
-	if N == 0 {
-		N = 5
+	// Cluster size and replication factor N are distinct: with QuorumN < NodeCount, each
+	// key lives on only N of the nodes (its preference list on the ring). Defaulting
+	// N=NodeCount keeps the classic "every node is a replica" behavior.
+	nodeCount := cfg.NodeCount
+	if nodeCount == 0 {
+		nodeCount = 5
+	}
+	N := cfg.QuorumN
+	if N <= 0 || N > nodeCount {
+		N = nodeCount
 	}
 	W := cfg.QuorumW
 	R := cfg.QuorumR
@@ -349,14 +370,23 @@ func (o *Orchestrator) createLeaderlessCluster(cluster *Cluster, cfg ClusterConf
 	}
 	qConfig := quorum.QuorumConfig{N: N, W: W, R: R}
 
-	nodeIDs := make([]string, N)
-	for i := 0; i < N; i++ {
+	nodeIDs := make([]string, nodeCount)
+	for i := 0; i < nodeCount; i++ {
 		nodeIDs[i] = fmt.Sprintf("node-%s-%d", cluster.ID[:8], i+1)
 	}
 
 	for _, id := range nodeIDs {
 		n := node.NewLeaderlessNode(id, cluster.ID, cluster.Fabric, o.bus, qConfig)
 		n.SetAllNodes(nodeIDs)
+		if cfg.ConsistencyLevel != "" {
+			n.SetConsistencyLevel(node.ConsistencyLevel(cfg.ConsistencyLevel))
+		}
+		if cfg.ReadRepairMode != "" {
+			n.SetReadRepairMode(node.ReadRepairMode(cfg.ReadRepairMode))
+		}
+		if cfg.SloppyQuorum != nil {
+			n.SetSloppyQuorum(*cfg.SloppyQuorum)
+		}
 		cluster.Nodes[id] = n
 		cluster.NodeIDs = append(cluster.NodeIDs, id)
 		cluster.Metrics.AddNode(n.GetMetrics())
@@ -678,10 +708,16 @@ func (o *Orchestrator) Write(clusterID, nodeID, key string, value []byte, client
 		return nil, fmt.Errorf("no target node available")
 	}
 
+	invoke := time.Now().UnixNano()
 	entry, err := targetNode.Write(key, value, clientID)
 	if err != nil {
 		return nil, err
 	}
+	// Record the write in the op history for the linearizability checker.
+	c.recordOp(checker.Op{
+		ClientID: clientID, Kind: checker.OpWrite, Key: key,
+		Value: string(value), Invoke: invoke, Complete: time.Now().UnixNano(),
+	})
 
 	c.Metrics.IncrWrites()
 
@@ -770,10 +806,16 @@ func (o *Orchestrator) Read(clusterID, nodeID, key, clientID string) (*ReadResul
 		return nil, fmt.Errorf("no target node available")
 	}
 
+	invoke := time.Now().UnixNano()
 	entry, err := targetNode.Read(key, clientID)
 	if err != nil {
 		return nil, err
 	}
+	// Record the observed value in the op history for the linearizability checker.
+	c.recordOp(checker.Op{
+		ClientID: clientID, Kind: checker.OpRead, Key: key,
+		Value: string(entry.Value), Invoke: invoke, Complete: time.Now().UnixNano(),
+	})
 
 	c.Metrics.IncrReads()
 
