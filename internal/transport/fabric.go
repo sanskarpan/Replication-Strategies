@@ -40,17 +40,47 @@ type link struct {
 	lastAt time.Time
 }
 
+// latencyModel describes a realistic per-link latency distribution: a base RTT with
+// symmetric uniform jitter, plus an occasional heavy-tail spike (tailProb chance of
+// adding tailMult×base) to model the p99 tail that fixed latency can never show.
+type latencyModel struct {
+	base     int
+	jitter   int
+	tailProb float64
+	tailMult int
+}
+
+// sample draws a latency in ms from the model using rng (caller holds fabricRandMu).
+func (m latencyModel) sample(rng *rand.Rand) int {
+	v := m.base
+	if m.jitter > 0 {
+		v += rng.Intn(2*m.jitter+1) - m.jitter
+	}
+	if m.tailProb > 0 && rng.Float64() < m.tailProb {
+		mult := m.tailMult
+		if mult <= 0 {
+			mult = 1
+		}
+		v += m.base * mult
+	}
+	if v < 0 {
+		v = 0
+	}
+	return v
+}
+
 type NetworkFabric struct {
-	mu         sync.RWMutex
-	nodes      map[string]chan Message
-	latencyMs  map[string]map[string]int
-	dropRate   map[string]map[string]float64
-	partitions map[string]*Partition
-	links      map[string]*link
-	rng        *rand.Rand
-	done       chan struct{} // closed by Close() to stop all link workers
-	closed     bool
-	dropped    atomic.Uint64 // backpressure drops (full link queue / full inbox)
+	mu          sync.RWMutex
+	nodes       map[string]chan Message
+	latencyMs   map[string]map[string]int
+	latencyDist map[string]map[string]latencyModel
+	dropRate    map[string]map[string]float64
+	partitions  map[string]*Partition
+	links       map[string]*link
+	rng         *rand.Rand
+	done        chan struct{} // closed by Close() to stop all link workers
+	closed      bool
+	dropped     atomic.Uint64 // backpressure drops (full link queue / full inbox)
 }
 
 // Dropped returns the number of messages dropped due to back-pressure (full queues),
@@ -59,13 +89,14 @@ func (f *NetworkFabric) Dropped() uint64 { return f.dropped.Load() }
 
 func NewNetworkFabric() *NetworkFabric {
 	return &NetworkFabric{
-		nodes:      make(map[string]chan Message),
-		latencyMs:  make(map[string]map[string]int),
-		dropRate:   make(map[string]map[string]float64),
-		partitions: make(map[string]*Partition),
-		links:      make(map[string]*link),
-		rng:        rand.New(rand.NewSource(time.Now().UnixNano())),
-		done:       make(chan struct{}),
+		nodes:       make(map[string]chan Message),
+		latencyMs:   make(map[string]map[string]int),
+		latencyDist: make(map[string]map[string]latencyModel),
+		dropRate:    make(map[string]map[string]float64),
+		partitions:  make(map[string]*Partition),
+		links:       make(map[string]*link),
+		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		done:        make(chan struct{}),
 	}
 }
 
@@ -146,6 +177,7 @@ func (f *NetworkFabric) Send(msg Message) {
 	f.mu.RLock()
 	_, ok := f.nodes[msg.TargetID]
 	latency := f.getLatency(msg.SenderID, msg.TargetID)
+	model, hasModel := f.getLatencyModel(msg.SenderID, msg.TargetID)
 	drop := f.getDropRate(msg.SenderID, msg.TargetID)
 	blocked := f.isPartitioned(msg.SenderID, msg.TargetID)
 	f.mu.RUnlock()
@@ -155,6 +187,11 @@ func (f *NetworkFabric) Send(msg Message) {
 	}
 	fabricRandMu.Lock()
 	roll := f.rng.Float64()
+	// Sample the jittered/heavy-tail latency under the same lock as the drop roll so
+	// all fabric randomness serializes through one RNG (reproducible, race-free).
+	if hasModel {
+		latency = model.sample(f.rng)
+	}
 	fabricRandMu.Unlock()
 	if roll < drop {
 		return // packet dropped
@@ -199,6 +236,28 @@ func (f *NetworkFabric) SetLatency(from, to string, ms int) {
 	f.latencyMs[from][to] = ms
 }
 
+// SetLatencyDist configures a realistic latency distribution for the from→to link:
+// base RTT (ms), symmetric jitter (±ms), and a tailProb chance of a heavy-tail spike
+// of tailMult×base. This replaces the fixed per-link latency when set, so metrics can
+// show a real p50/p99 spread instead of a single constant.
+func (f *NetworkFabric) SetLatencyDist(from, to string, base, jitter int, tailProb float64, tailMult int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.latencyDist[from] == nil {
+		f.latencyDist[from] = make(map[string]latencyModel)
+	}
+	f.latencyDist[from][to] = latencyModel{base: base, jitter: jitter, tailProb: tailProb, tailMult: tailMult}
+}
+
+func (f *NetworkFabric) getLatencyModel(from, to string) (latencyModel, bool) {
+	if m, ok := f.latencyDist[from]; ok {
+		if l, ok := m[to]; ok {
+			return l, true
+		}
+	}
+	return latencyModel{}, false
+}
+
 func (f *NetworkFabric) SetDropRate(from, to string, rate float64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -224,6 +283,7 @@ func (f *NetworkFabric) ClearFaults() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.latencyMs = make(map[string]map[string]int)
+	f.latencyDist = make(map[string]map[string]latencyModel)
 	f.dropRate = make(map[string]map[string]float64)
 	f.partitions = make(map[string]*Partition)
 }
