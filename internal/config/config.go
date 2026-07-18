@@ -1,7 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,4 +63,43 @@ func Load(path string) (*Config, error) {
 		cfg.Simulation.HeartbeatIntervalMs = d.Simulation.HeartbeatIntervalMs
 	}
 	return cfg, nil
+}
+
+// ApplyEnvOverrides layers environment variables over the loaded config so the server
+// is 12-factor friendly. Recognised: PORT, MAX_CLUSTERS, CORS_ORIGINS (comma-separated).
+func (c *Config) ApplyEnvOverrides() {
+	if v := os.Getenv("PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			c.Server.Port = p
+		}
+	}
+	if v := os.Getenv("MAX_CLUSTERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Simulation.MaxClusters = n
+		}
+	}
+	if v := os.Getenv("CORS_ORIGINS"); v != "" {
+		parts := strings.Split(v, ",")
+		origins := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if t := strings.TrimSpace(p); t != "" {
+				origins = append(origins, t)
+			}
+		}
+		c.Server.CORSOrigins = origins
+	}
+}
+
+// Validate checks the configuration for obviously-invalid values.
+func (c *Config) Validate() error {
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return fmt.Errorf("server.port must be in [1,65535], got %d", c.Server.Port)
+	}
+	if c.Simulation.MaxClusters < 0 {
+		return fmt.Errorf("simulation.max_clusters must be >= 0, got %d", c.Simulation.MaxClusters)
+	}
+	if c.Simulation.HeartbeatIntervalMs < 0 {
+		return fmt.Errorf("simulation.heartbeat_interval_ms must be >= 0, got %d", c.Simulation.HeartbeatIntervalMs)
+	}
+	return nil
 }

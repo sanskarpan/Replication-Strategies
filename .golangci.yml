@@ -1,0 +1,60 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - gofmt
+    - misspell
+    - unconvert
+    - gocritic
+
+linters-settings:
+  gocritic:
+    # Keep it light: only the well-behaved default checks, no opinionated ones.
+    enabled-tags:
+      - diagnostic
+    disabled-checks:
+      - ifElseChain
+      - singleCaseSwitch
+  govet:
+    enable:
+      - shadow
+    settings:
+      shadow:
+        strict: false
+  misspell:
+    locale: US
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+
+issues:
+  # Don't cap findings per linter / per file.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Tests are allowed to be noisier: skip error-checking and security-ish nits.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gocritic
+        - unconvert
+    # Generated files, if any, should not be linted.
+    - path: \.gen\.go
+      linters:
+        - govet
+        - staticcheck
+        - errcheck
+        - ineffassign
+        - unused
+        - gofmt
+        - misspell
+        - unconvert
+        - gocritic

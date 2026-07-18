@@ -1,4 +1,37 @@
-.PHONY: build run test test-unit test-integration test-race tidy lint clean frontend-install frontend-dev
+.PHONY: build run test test-unit test-integration test-race tidy lint clean frontend-install frontend-dev cover bench fuzz fmt fmt-check vet typecheck ci
+
+# Coverage: race-enabled profile + per-function summary + HTML report
+cover:
+	go test -race -covermode=atomic -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "coverage.html written"
+
+# Benchmarks (hot paths: store, vclock, quorum, anti-entropy)
+bench:
+	go test -bench=. -benchmem -run=^$$ ./...
+
+# Short native fuzz smoke run for each fuzz target
+fuzz:
+	go test -run=^$$ -fuzz=^FuzzVectorClockMerge$$ -fuzztime=10s ./internal/storage/
+	go test -run=^$$ -fuzz=^FuzzQuorum$$ -fuzztime=10s ./internal/quorum/
+	go test -run=^$$ -fuzz=^FuzzCRDTMerge$$ -fuzztime=10s ./internal/conflict/
+
+# Formatting
+fmt:
+	gofmt -w .
+
+fmt-check:
+	@test -z "$$(gofmt -l .)" || (echo "gofmt needed:"; gofmt -l .; exit 1)
+
+vet:
+	go vet ./...
+
+typecheck:
+	cd frontend && bunx tsc --noEmit
+
+# Full local CI mirror
+ci: fmt-check vet test-race typecheck
 
 # Build the Go server
 build:

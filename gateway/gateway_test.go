@@ -263,3 +263,26 @@ func TestGateway_PrimitiveDemos(t *testing.T) {
 		assert.NotEmpty(t, body)
 	}
 }
+
+// §3: operational endpoints — health, readiness, version, and Prometheus metrics.
+func TestGateway_OpsEndpoints(t *testing.T) {
+	ts, _ := newTestServer(t)
+	for _, p := range []string{"/healthz", "/readyz", "/version"} {
+		code, body := doJSON(t, "GET", ts.URL+p, "")
+		require.Equal(t, http.StatusOK, code, "%s: %s", p, body)
+	}
+	// Create a cluster + write so metrics have data, then scrape /metrics.
+	cid := createCluster(t, ts.URL, `{"strategy":"single_leader","node_count":3,"replication_mode":"async"}`)
+	code, _ := doJSON(t, "POST", ts.URL+"/api/v1/clusters/"+cid+"/write", `{"key":"k","value":"v","client_id":"c"}`)
+	require.Equal(t, http.StatusOK, code)
+	resp, err := http.Get(ts.URL + "/metrics")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	assert.Contains(t, body, "# TYPE replsim_writes_total counter")
+	assert.Contains(t, body, "replsim_writes_total{cluster=")
+	assert.Contains(t, body, "replsim_clusters ")
+	assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
+}

@@ -6,6 +6,13 @@ work for the Replication-Strategies simulator, produced from a four-track deep a
 
 Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL** 1–2 weeks.
 
+> **Status:** **§0 and §1 are fully shipped** (all bugs + all distributed-systems
+> features). Work is now proceeding through **§3 (engineering/infra/testing)**, **§2
+> (frontend/visualization)**, and **§4 (product/pedagogy)** in waves — each item
+> implemented with tests and end-to-end verification. Pure-content items that aren't
+> code (a recorded demo video, a hosted live deploy, a written blog series) are called
+> out as out-of-repo and left for manual follow-up.
+
 ## Progress
 
 - ✅ **§0 — all five fixes** (PR #94): CORS config wired, deps pinned, BFF dev bundle

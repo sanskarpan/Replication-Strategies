@@ -120,8 +120,11 @@ type LWWMapEntry struct {
 	NodeID    string `json:"node_id"`
 }
 
-// Merge takes, per key, the entry with the higher (timestamp, node) — a deterministic
-// total order so all replicas converge.
+// Merge takes, per key, the entry with the higher (timestamp, node, value) — a full
+// total order so all replicas converge. Value is the final tiebreak so the merge stays
+// commutative/associative even in the degenerate case where two distinct values share
+// the same timestamp AND node id (impossible under real HLC+node writes, but a merge
+// that isn't a total function isn't a proper CRDT — a property test found this).
 func (a *LWWMap) Merge(b *LWWMap) *LWWMap {
 	out := &LWWMap{Type: LWWMapType, Entries: map[string]LWWMapEntry{}}
 	for k, v := range a.Entries {
@@ -129,9 +132,21 @@ func (a *LWWMap) Merge(b *LWWMap) *LWWMap {
 	}
 	for k, v := range b.Entries {
 		cur, ok := out.Entries[k]
-		if !ok || v.Timestamp > cur.Timestamp || (v.Timestamp == cur.Timestamp && v.NodeID > cur.NodeID) {
+		if !ok || lwwMapEntryWins(v, cur) {
 			out.Entries[k] = v
 		}
 	}
 	return out
+}
+
+// lwwMapEntryWins reports whether x should win over y under the (timestamp, node, value)
+// total order.
+func lwwMapEntryWins(x, y LWWMapEntry) bool {
+	if x.Timestamp != y.Timestamp {
+		return x.Timestamp > y.Timestamp
+	}
+	if x.NodeID != y.NodeID {
+		return x.NodeID > y.NodeID
+	}
+	return x.Value > y.Value
 }

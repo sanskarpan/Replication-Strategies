@@ -1,0 +1,30 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: replication-strategies-backend
+    ports:
+      - "8080:8080"
+    networks:
+      - repl-net
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: replication-strategies-frontend
+    ports:
+      - "3001:3001"
+    environment:
+      BACKEND: http://backend:8080
+    depends_on:
+      - backend
+    networks:
+      - repl-net
+    restart: unless-stopped
+
+networks:
+  repl-net:
+    driver: bridge
