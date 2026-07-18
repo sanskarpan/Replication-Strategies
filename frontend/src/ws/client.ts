@@ -2,11 +2,18 @@ import type { SimEvent, EventType } from "../api/types";
 
 type EventHandler = (evt: SimEvent) => void;
 
+// Coarse connection status surfaced to the UI status pill.
+export type WSStatus = "connecting" | "live" | "reconnecting" | "down";
+type StatusHandler = (status: WSStatus) => void;
+
 export class WSClient {
   private ws: WebSocket | null = null;
   private handlers: Map<EventType | "*", EventHandler[]> = new Map();
+  private statusHandlers: StatusHandler[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private url: string;
+  private everConnected = false;
+  status: WSStatus = "connecting";
 
   constructor(filter: EventType[] = []) {
     const filterParam = filter.length ? `?filter=${filter.join(",")}` : "";
@@ -16,8 +23,23 @@ export class WSClient {
     this.url = `${proto}//${window.location.host}/ws${filterParam}`;
   }
 
+  onStatus(fn: StatusHandler) {
+    this.statusHandlers.push(fn);
+    fn(this.status); // emit current state immediately
+  }
+
+  private setStatus(s: WSStatus) {
+    this.status = s;
+    this.statusHandlers.forEach((h) => h(s));
+  }
+
   connect() {
+    this.setStatus(this.everConnected ? "reconnecting" : "connecting");
     this.ws = new WebSocket(this.url);
+    this.ws.onopen = () => {
+      this.everConnected = true;
+      this.setStatus("live");
+    };
     this.ws.onmessage = (e) => {
       try {
         const evt: SimEvent = JSON.parse(e.data);
@@ -25,6 +47,7 @@ export class WSClient {
       } catch {}
     };
     this.ws.onclose = () => {
+      this.setStatus(this.everConnected ? "reconnecting" : "down");
       this.reconnectTimer = setTimeout(() => this.connect(), 2000);
     };
     this.ws.onerror = () => this.ws?.close();
