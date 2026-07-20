@@ -517,3 +517,36 @@ kbd {
   .node-circle.violation { animation: none; }
   .event-timeline .tick.new { animation: none; }
 }
+
+/* ─── EPIC B: Timeline scrubber ──────────────────────────────────────────── */
+.timeline-panel {
+  position: sticky; bottom: 0; z-index: 20;
+  background: var(--surface2); border-top: 1px solid var(--border);
+  padding: 6px 12px; display: flex; align-items: center; gap: 10px;
+  min-height: 44px;
+}
+.timeline-panel:not(.has-cluster) { opacity: 0.45; pointer-events: none; }
+.timeline-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.timeline-track { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.timeline-canvas { width: 100%; height: 8px; display: block; border-radius: 3px; background: var(--surface); }
+.timeline-thumb {
+  width: 100%; height: 14px; cursor: pointer; accent-color: var(--accent);
+  background: transparent; -webkit-appearance: none; appearance: none;
+}
+.timeline-seq-label { font-size: 10px; color: var(--text-dim); white-space: nowrap; min-width: 80px; }
+.replay-badge {
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; background: var(--warn); color: #000;
+}
+
+/* ─── EPIC B: Jepsen swimlane panel ─────────────────────────────────────── */
+#jepsen-panel { grid-column: 1 / -1; }
+#jepsen-body { min-height: 120px; }
+.jepsen-empty { color: var(--text-dim); font-size: 12px; padding: 16px; }
+.jepsen-lin-badge {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+}
+.jepsen-lin-badge.ok { background: var(--accent2); color: #000; }
+.jepsen-lin-badge.viol { background: var(--danger); color: #fff; }
+.jepsen-grid text { fill: var(--text-dim); font-size: 10px; }
+.jepsen-grid line, .jepsen-grid path { stroke: var(--border); }
