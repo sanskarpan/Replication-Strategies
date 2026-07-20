@@ -25,8 +25,8 @@ const nodePos = new Map<string, { x: number; y: number }>();
 function partitionSet(cluster: ClusterState): Set<string> {
   const partitioned = new Set<string>();
   for (const part of Object.values(cluster.partitions || {})) {
-    for (const a of Object.keys(part.group_a)) {
-      for (const b of Object.keys(part.group_b)) {
+    for (const a of Object.keys(part.group_a ?? {})) {
+      for (const b of Object.keys(part.group_b ?? {})) {
         partitioned.add(`${a}-${b}`);
         partitioned.add(`${b}-${a}`);
       }
