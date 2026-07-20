@@ -18,7 +18,7 @@ type Acceptor struct {
 // acceptor promises not to accept any proposal numbered lower than n iff n is
 // strictly greater than any number it has already promised. On promise it
 // reports back the highest-numbered proposal it has previously accepted, if
-// any, so the proposer can honour the Paxos safety rule.
+// any, so the proposer can honor the Paxos safety rule.
 func (a *Acceptor) Prepare(n uint64) (promised bool, acceptedN uint64, acceptedV interface{}) {
 	if n > a.promisedN {
 		a.promisedN = n

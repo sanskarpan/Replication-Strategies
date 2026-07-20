@@ -11,7 +11,7 @@ type GlossaryTerm struct {
 	DDIA       string `json:"ddia"` // Designing Data-Intensive Applications chapter reference
 }
 
-// Glossary is the built-in term catalogue.
+// Glossary is the built-in term catalog.
 var Glossary = []GlossaryTerm{
 	{"Replication lag", "The delay between a write committing on the leader and a follower applying it. Async replication trades durability/consistency for lower write latency.", "DDIA Ch.5 — Leaders and Followers"},
 	{"Quorum (W+R>N)", "A read and write quorum overlap when W+R>N, guaranteeing a read sees the latest acknowledged write. Otherwise stale reads are possible.", "DDIA Ch.5 — Quorums for reading and writing"},
@@ -41,7 +41,7 @@ type Lesson struct {
 	Steps    []LessonStep `json:"steps"`
 }
 
-// Lessons is the built-in guided-lesson catalogue (predict-then-reveal).
+// Lessons is the built-in guided-lesson catalog (predict-then-reveal).
 var Lessons = []Lesson{
 	{
 		Title:    "Why async replication can lose your write",

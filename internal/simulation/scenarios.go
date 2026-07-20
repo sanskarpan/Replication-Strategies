@@ -39,7 +39,7 @@ func readValue(o *Orchestrator, clusterID, nodeID, key string) string {
 }
 
 // corruptReplica overwrites one replica's stored value for key with a bad value carrying
-// an older timestamp, modelling a corrupt/stale on-disk copy that anti-entropy must heal.
+// an older timestamp, modeling a corrupt/stale on-disk copy that anti-entropy must heal.
 func corruptReplica(c *Cluster, nodeID, key string) {
 	n, ok := c.GetNode(nodeID)
 	if !ok {
@@ -67,7 +67,7 @@ type Scenario struct {
 	NodeCount   int                      `json:"node_count"`
 }
 
-// Scenarios is the catalogue of built-in demonstration scenarios.
+// Scenarios is the catalog of built-in demonstration scenarios.
 var Scenarios = []Scenario{
 	{
 		Name:        "ReplicationLag",

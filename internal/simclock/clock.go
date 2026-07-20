@@ -63,7 +63,7 @@ func (c *RealClock) Sleep(d time.Duration) { time.Sleep(d) }
 func (c *RealClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // Rand returns the seeded RNG. The returned *rand.Rand is shared, so callers on
-// multiple goroutines must serialise access themselves; the guard here only
+// multiple goroutines must serialize access themselves; the guard here only
 // protects the pointer handoff.
 func (c *RealClock) Rand() *rand.Rand {
 	c.mu.Lock()
@@ -155,7 +155,7 @@ func (c *VirtualClock) Now() int64 {
 }
 
 // Rand returns the seeded RNG. It is guarded by the same mutex as the rest of
-// the clock state so concurrent draws are serialised deterministically.
+// the clock state so concurrent draws are serialized deterministically.
 func (c *VirtualClock) Rand() *rand.Rand {
 	c.mu.Lock()
 	defer c.mu.Unlock()

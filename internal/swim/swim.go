@@ -2,7 +2,7 @@
 // failure detector (Scalable Weakly-consistent Infection-style process group
 // Membership). This is logic only: there is no real network, timers, or I/O.
 // Callers drive it by invoking the transition methods, and dissemination is
-// modelled by exchanging member lists through Merge.
+// modeled by exchanging member lists through Merge.
 //
 // Membership state is reconciled using incarnation numbers. Each member owns a
 // monotonically increasing incarnation counter that it bumps to refute stale

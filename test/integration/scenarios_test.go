@@ -51,7 +51,7 @@ func TestScenarios_NarrationAndVerdicts(t *testing.T) {
 	}
 }
 
-// TestScenarios_CatalogueValid asserts every catalogued scenario is runnable.
+// TestScenarios_CatalogValid asserts every cataloged scenario is runnable.
 func TestScenarios_CatalogueValid(t *testing.T) {
 	bus := events.NewEventBus(100)
 	orch := simulation.NewOrchestrator(bus)

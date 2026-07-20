@@ -69,10 +69,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	for _, c := range clusters {
 		snap := c.Metrics.Snapshot()
 		cl := escapeLabel(c.ID)
-		strat := escapeLabel(snap.Strategy)
-		fmt.Fprintf(&b, "replsim_writes_total{cluster=%q,strategy=%q} %d\n", cl, strat, snap.TotalWrites)
-		fmt.Fprintf(&b, "replsim_reads_total{cluster=%q,strategy=%q} %d\n", cl, strat, snap.TotalReads)
-		fmt.Fprintf(&b, "replsim_conflicts_total{cluster=%q,strategy=%q} %d\n", cl, strat, snap.TotalConflicts)
+		strategy := escapeLabel(snap.Strategy)
+		fmt.Fprintf(&b, "replsim_writes_total{cluster=%q,strategy=%q} %d\n", cl, strategy, snap.TotalWrites)
+		fmt.Fprintf(&b, "replsim_reads_total{cluster=%q,strategy=%q} %d\n", cl, strategy, snap.TotalReads)
+		fmt.Fprintf(&b, "replsim_conflicts_total{cluster=%q,strategy=%q} %d\n", cl, strategy, snap.TotalConflicts)
 		fmt.Fprintf(&b, "replsim_dropped_messages{cluster=%q} %d\n", cl, c.GetState().DroppedMessages)
 		for id, nm := range snap.NodeMetrics {
 			node := escapeLabel(id)
