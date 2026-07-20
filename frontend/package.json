@@ -6,8 +6,10 @@
     "bff": "bun run server/bff.ts",
     "dev": "bun run server/bff.ts",
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/main.ts --outdir dist --minify",
-    "e2e": "node e2e-run.mjs"
+    "build": "bun build src/main.ts --outdir dist --sourcemap --minify",
+    "e2e": "node e2e-run.mjs",
+    "dev:hmr": "DEV_HMR=1 bun run server/bff.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "elysia": "^1.4.28",
