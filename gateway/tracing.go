@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -18,9 +20,22 @@ type responseWriter struct {
 	status int
 }
 
+// compile-time check: responseWriter must forward Hijacker so WebSocket upgrades work.
+var _ http.Hijacker = (*responseWriter)(nil)
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards to the underlying ResponseWriter so WebSocket upgrades through
+// the OTel middleware do not fail with "server does not support hijacking".
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, net.ErrClosed
+	}
+	return hj.Hijack()
 }
 
 // otelMiddleware is a Chi middleware that starts a server-side OTel span for
