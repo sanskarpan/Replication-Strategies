@@ -249,7 +249,7 @@ func runCheck(orch *simulation.Orchestrator, cfg simulation.ClusterConfig) (bool
 
 	for i := 0; i < nWrites; i++ {
 		key := fmt.Sprintf("check-key-%d", i)
-		if _, err := orch.Read(cluster.ID, "", key, clientID); err != nil {
+		if _, err := orch.Read(context.Background(), cluster.ID, "", key, clientID); err != nil {
 			fmt.Fprintf(&b, "FAIL: read %s: %v\n", key, err)
 			return false, b.String()
 		}

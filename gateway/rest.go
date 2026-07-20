@@ -324,7 +324,7 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	clientID := r.URL.Query().Get("client_id")
 	nodeID := r.URL.Query().Get("node_id")
 
-	result, err := s.orch.Read(id, nodeID, key, clientID)
+	result, err := s.orch.Read(r.Context(), id, nodeID, key, clientID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -601,7 +601,7 @@ func (s *Server) handleDemoRYW(w http.ResponseWriter, r *http.Request) {
 	}
 	time.Sleep(120 * time.Millisecond) // write is delivered-and-dropped at the paused replica
 	s.orch.ResumeNode(id, readNode)    //nolint:errcheck
-	readRes, rerr := s.orch.Read(id, readNode, key, clientID)
+	readRes, rerr := s.orch.Read(r.Context(), id, readNode, key, clientID)
 	got, ok := entryValue(readRes)
 	consistent := rerr == nil && ok && got == value
 
@@ -645,8 +645,8 @@ func (s *Server) handleDemoMonotonic(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(120 * time.Millisecond)                       // v2 delivered-and-dropped at paused readNode
 	s.orch.ResumeNode(id, readNode)                          //nolint:errcheck
 
-	read1, _ := s.orch.Read(id, writeNode, key, clientID) // fresh -> v2
-	read2, _ := s.orch.Read(id, readNode, key, clientID)  // stale -> v1
+	read1, _ := s.orch.Read(r.Context(), id, writeNode, key, clientID) // fresh -> v2
+	read2, _ := s.orch.Read(r.Context(), id, readNode, key, clientID)  // stale -> v1
 	v1, _ := entryValue(read1)
 	v2, _ := entryValue(read2)
 	violated := v1 == "v2" && v2 == "v1"
@@ -698,7 +698,7 @@ func (s *Server) handleDemoConsistentPrefix(w http.ResponseWriter, r *http.Reque
 	// Read the final value from the read node; a consistent prefix means we observe one
 	// of the sequence values in order (here, the latest), never a value that skipped
 	// earlier writes out of order.
-	readRes, _ := s.orch.Read(id, readNode, key, clientID)
+	readRes, _ := s.orch.Read(r.Context(), id, readNode, key, clientID)
 	got, ok := entryValue(readRes)
 	// Determine the observed position in the sequence.
 	pos := -1

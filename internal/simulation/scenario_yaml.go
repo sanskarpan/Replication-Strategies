@@ -154,7 +154,7 @@ func (o *Orchestrator) runScenarioSpecSteps(clusterID string, spec *ScenarioSpec
 		case "write":
 			o.Write(context.Background(), clusterID, resolveNode(c, step.Node), step.Key, []byte(step.Value), "spec-client") //nolint:errcheck
 		case "read":
-			o.Read(clusterID, resolveNode(c, step.Node), step.Key, "spec-client") //nolint:errcheck
+			o.Read(context.Background(), clusterID, resolveNode(c, step.Node), step.Key, "spec-client") //nolint:errcheck
 		case "pause":
 			o.PauseNode(clusterID, resolveNode(c, step.Node)) //nolint:errcheck
 		case "resume":
@@ -170,7 +170,7 @@ func (o *Orchestrator) runScenarioSpecSteps(clusterID string, spec *ScenarioSpec
 		case "sleep", "pause_ms":
 			time.Sleep(time.Duration(step.Ms) * time.Millisecond)
 		case "anti_entropy":
-			o.RunAntiEntropy(clusterID) //nolint:errcheck
+			o.RunAntiEntropy(context.Background(), clusterID) //nolint:errcheck
 		case "narrate":
 			// narration already emitted above; no side effect.
 		}

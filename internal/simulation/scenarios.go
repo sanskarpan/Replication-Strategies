@@ -28,7 +28,7 @@ func convergenceActual(r ConvergenceReport) string {
 
 // readValue reads a key through the orchestrator and returns the value string ("" on error).
 func readValue(o *Orchestrator, clusterID, nodeID, key string) string {
-	res, err := o.Read(clusterID, nodeID, key, "verdict-reader")
+	res, err := o.Read(context.Background(), clusterID, nodeID, key, "verdict-reader")
 	if err != nil || res == nil {
 		return ""
 	}
@@ -312,7 +312,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			o.ResumeNode(clusterID, c.NodeIDs[2]) //nolint:errcheck
 
 			// A read now triggers repair.
-			o.Read(clusterID, c.NodeIDs[0], "repair-key", "scenario-client") //nolint:errcheck
+			o.Read(context.Background(), clusterID, c.NodeIDs[0], "repair-key", "scenario-client") //nolint:errcheck
 		}
 
 	case "NetworkPartitionHeal":
@@ -330,7 +330,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 				o.HealPartition(clusterID, partID) //nolint:errcheck
 			}
 			o.narrate(clusterID, "partition healed; anti-entropy reconciles the divergent keys")
-			o.RunAntiEntropy(clusterID) //nolint:errcheck
+			o.RunAntiEntropy(context.Background(), clusterID) //nolint:errcheck
 			conv := c.CheckConvergence()
 			o.verdict(clusterID, "all replicas converge after the heal",
 				convergenceActual(conv), conv.Converged)
@@ -416,7 +416,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			time.Sleep(50 * time.Millisecond)
 			o.Write(context.Background(), clusterID, normal, "skew-key", []byte("second-causally-later"), "c1") //nolint:errcheck
 			time.Sleep(150 * time.Millisecond)
-			o.RunAntiEntropy(clusterID) //nolint:errcheck
+			o.RunAntiEntropy(context.Background(), clusterID) //nolint:errcheck
 			// HLC should carry the causal order so the later write wins despite the skew.
 			won := readValue(o, clusterID, normal, "skew-key") == "second-causally-later"
 			o.verdict(clusterID, "HLC preserves causal order: the later write wins despite the backward skew",
@@ -431,7 +431,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 		corruptReplica(c, c.NodeIDs[3], "corrupt-key")
 		time.Sleep(30 * time.Millisecond)
 		o.narrate(clusterID, "anti-entropy compares Merkle trees and repairs the corrupt replica")
-		o.RunAntiEntropy(clusterID) //nolint:errcheck
+		o.RunAntiEntropy(context.Background(), clusterID) //nolint:errcheck
 		conv := c.CheckConvergence()
 		o.verdict(clusterID, "anti-entropy heals the corrupt replica; all replicas agree",
 			convergenceActual(conv), conv.Converged)

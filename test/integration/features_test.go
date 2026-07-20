@@ -28,7 +28,7 @@ func TestLinearizability_SingleLeaderIsLinearizable(t *testing.T) {
 	for i, v := range []string{"1", "2", "3"} {
 		_, err := orch.Write(context.Background(), c.ID, c.LeaderID, "k", []byte(v), "client1")
 		require.NoError(t, err)
-		_, err = orch.Read(c.ID, c.LeaderID, "k", "client1")
+		_, err = orch.Read(context.Background(), c.ID, c.LeaderID, "k", "client1")
 		require.NoError(t, err, "read %d", i)
 	}
 
@@ -67,7 +67,7 @@ func TestAntiEntropy_ReconcilesDivergentReplicas(t *testing.T) {
 	// Heal the partition; anti-entropy runs before the 2s hinted-handoff ticker fires.
 	require.NoError(t, orch.HealPartition(c.ID, partID))
 
-	rep, err := orch.RunAntiEntropy(c.ID)
+	rep, err := orch.RunAntiEntropy(context.Background(), c.ID)
 	require.NoError(t, err)
 	assert.Contains(t, rep.DivergentKeys, "ae-key", "Merkle diff should flag the divergent key")
 	assert.Positive(t, rep.Reconciled, "stale replicas should be reconciled")
@@ -101,7 +101,7 @@ func TestSafeReconfigure_PreservesDataAndOverlap(t *testing.T) {
 	assert.Greater(t, rep.NewQuorum[1]+rep.NewQuorum[2], rep.NewQuorum[0], "new W+R>N")
 
 	// The value survives the reconfiguration and remains readable.
-	res, err := orch.Read(c.ID, rep.AddedNode, "rk", "client1")
+	res, err := orch.Read(context.Background(), c.ID, rep.AddedNode, "rk", "client1")
 	require.NoError(t, err)
 	assert.Equal(t, "v1", string(entryValue(t, res.Entry)))
 }

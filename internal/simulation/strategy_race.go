@@ -66,7 +66,7 @@ func (o *Orchestrator) RunStrategyRace(strategies []string, nodeCount, ops int) 
 		}
 		for i := 0; i < ops; i++ {
 			key := fmt.Sprintf("race-%d", i)
-			o.Read(cluster.ID, "", key, clientID) //nolint:errcheck
+			o.Read(context.Background(), cluster.ID, "", key, clientID) //nolint:errcheck
 		}
 
 		res.AvgWriteLatencyMs = avgWriteLatency(cluster.Metrics.Snapshot())

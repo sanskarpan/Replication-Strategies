@@ -51,7 +51,7 @@ func TestRaft_ElectsLeaderReplicatesAndFailsOver(t *testing.T) {
 	// 2. A write (auto-routed to the leader) commits and is readable.
 	_, err = orch.Write(context.Background(), cluster.ID, "", "k", []byte("v1"), "c1")
 	require.NoError(t, err)
-	res, err := orch.Read(cluster.ID, "", "k", "c1")
+	res, err := orch.Read(context.Background(), cluster.ID, "", "k", "c1")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("v1"), res.Entry.(*storage.KVEntry).Value)
 
@@ -72,7 +72,7 @@ func TestRaft_ElectsLeaderReplicatesAndFailsOver(t *testing.T) {
 	// 5. Writes resume on the new leader and remain readable.
 	_, err = orch.Write(context.Background(), cluster.ID, "", "k2", []byte("v2"), "c1")
 	require.NoError(t, err, "writes resume after failover")
-	res2, err := orch.Read(cluster.ID, "", "k2", "c1")
+	res2, err := orch.Read(context.Background(), cluster.ID, "", "k2", "c1")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("v2"), res2.Entry.(*storage.KVEntry).Value)
 

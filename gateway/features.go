@@ -93,7 +93,7 @@ func (s *Server) handleInvariants(w http.ResponseWriter, r *http.Request) {
 // exchanged plus whether the cluster converged.
 func (s *Server) handleAntiEntropy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	rep, err := s.orch.RunAntiEntropy(id)
+	rep, err := s.orch.RunAntiEntropy(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return

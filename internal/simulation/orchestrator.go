@@ -844,11 +844,25 @@ func (o *Orchestrator) Delete(ctx context.Context, clusterID, nodeID, key, clien
 }
 
 // Read sends a read to the specified node (or the leader if nodeID is empty).
-func (o *Orchestrator) Read(clusterID, nodeID, key, clientID string) (*ReadResult, error) {
+func (o *Orchestrator) Read(ctx context.Context, clusterID, nodeID, key, clientID string) (*ReadResult, error) {
+	ctx, span := telemetry.Tracer().Start(ctx, "orchestrator.read",
+		oteltrace.WithAttributes(
+			attribute.String("cluster_id", clusterID),
+			attribute.String("node_id", nodeID),
+			attribute.String("key", key),
+			attribute.String("client_id", clientID),
+		),
+	)
+	defer span.End()
+
 	c, err := o.GetCluster(clusterID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	span.SetAttributes(attribute.String("strategy", string(c.Config.Strategy)))
+
 	if nodeID == "" && c.Config.Strategy == node.StrategyRaft {
 		nodeID = o.waitForRaftLeader(c)
 	}
@@ -866,12 +880,18 @@ func (o *Orchestrator) Read(clusterID, nodeID, key, clientID string) (*ReadResul
 	c.mu.RUnlock()
 
 	if targetNode == nil {
-		return nil, fmt.Errorf("no target node available")
+		err = fmt.Errorf("no target node available")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
+	span.SetAttributes(attribute.String("target_node_id", targetNode.ID()))
 
 	invoke := time.Now().UnixNano()
 	entry, err := targetNode.Read(key, clientID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 	// Record the observed value in the op history for the linearizability checker.
@@ -881,6 +901,17 @@ func (o *Orchestrator) Read(clusterID, nodeID, key, clientID string) (*ReadResul
 	})
 
 	c.Metrics.IncrReads()
+
+	// Propagate trace context into the read_received event.
+	_ = ctx // ctx used for span; carrier injected below
+	readEvt := events.Event{
+		Type:         events.EvtReadReceived,
+		ClusterID:    clusterID,
+		NodeID:       targetNode.ID(),
+		Data:         map[string]interface{}{"key": key},
+		TraceCarrier: telemetry.InjectCarrier(ctx),
+	}
+	o.bus.Publish(readEvt)
 
 	return &ReadResult{Entry: entry, NodeID: targetNode.ID()}, nil
 }

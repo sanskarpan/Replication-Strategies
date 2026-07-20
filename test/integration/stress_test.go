@@ -83,7 +83,7 @@ func TestStress_SustainedConcurrency(t *testing.T) {
 			case 0, 1, 2, 3:
 				_, _ = orch.Write(context.Background(), c.ID, target, key, []byte(fmt.Sprintf("v%d", rng.Intn(1000))), fmt.Sprintf("c%d", seed))
 			case 4, 5, 6:
-				_, _ = orch.Read(c.ID, target, key, fmt.Sprintf("c%d", seed))
+				_, _ = orch.Read(context.Background(), c.ID, target, key, fmt.Sprintf("c%d", seed))
 			case 7:
 				_ = orch.Delete(context.Background(), c.ID, target, key, fmt.Sprintf("c%d", seed))
 			case 8:

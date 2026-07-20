@@ -92,8 +92,8 @@ func TestRegression_Leaderless_W1_DataReplicates(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Both non-coordinator nodes should now have the data.
-	res1, err1 := orch.Read(cluster.ID, peer1, "w1-key", "c1")
-	_, err2 := orch.Read(cluster.ID, peer2, "w1-key", "c1")
+	res1, err1 := orch.Read(context.Background(), cluster.ID, peer1, "w1-key", "c1")
+	_, err2 := orch.Read(context.Background(), cluster.ID, peer2, "w1-key", "c1")
 
 	assert.NoError(t, err1, "peer1 should have data after W=1 write")
 	assert.NoError(t, err2, "peer2 should have data after W=1 write")
@@ -127,7 +127,7 @@ func TestRegression_Leaderless_W1_PeerCanRead(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(150 * time.Millisecond)
 
-	_, err = orch.Read(cluster.ID, peer, "peer-key", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, peer, "peer-key", "c1")
 	assert.NoError(t, err, "non-coordinator peer should have data after W=1 write replicates")
 }
 
@@ -182,7 +182,7 @@ func TestRegression_Leaderless_ReadRepair_TargetsStaleResponder(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// A quorum read may trigger repair because some responders have stale data.
-	_, _ = orch.Read(cluster.ID, cluster.NodeIDs[0], "repair-tgt-key", "c1")
+	_, _ = orch.Read(context.Background(), cluster.ID, cluster.NodeIDs[0], "repair-tgt-key", "c1")
 
 	// Wait briefly for any repair event.
 	select {
@@ -229,7 +229,7 @@ func TestRegression_MultiLeader_VCMonotonicity(t *testing.T) {
 	}
 
 	// Read back — should succeed without error.
-	_, err = orch.Read(cluster.ID, n1, "mono-key", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, n1, "mono-key", "c1")
 	assert.NoError(t, err)
 }
 

@@ -47,7 +47,7 @@ func TestLeaderless_QuorumRead(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
-	_, err = orch.Read(cluster.ID, cluster.NodeIDs[0], "read-key", "client1")
+	_, err = orch.Read(context.Background(), cluster.ID, cluster.NodeIDs[0], "read-key", "client1")
 	require.NoError(t, err)
 }
 
@@ -118,7 +118,7 @@ func TestLeaderless_ReadRepairEmitted(t *testing.T) {
 	orch.ResumeNode(cluster.ID, cluster.NodeIDs[2])
 
 	// Read — should trigger repair if stale nodes respond
-	orch.Read(cluster.ID, cluster.NodeIDs[0], "repair-key", "client1")
+	orch.Read(context.Background(), cluster.ID, cluster.NodeIDs[0], "repair-key", "client1")
 
 	// Check if repair event was emitted (may not fire in all timing conditions)
 	select {

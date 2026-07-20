@@ -63,7 +63,7 @@ func TestISSUE2_Leaderless_ReadLocalMiss_NoTimeout(t *testing.T) {
 	require.NoError(t, orch.ResumeNode(cluster.ID, cluster.NodeIDs[0]))
 
 	start := time.Now()
-	res, err := orch.Read(cluster.ID, cluster.NodeIDs[0], "k", "c1")
+	res, err := orch.Read(context.Background(), cluster.ID, cluster.NodeIDs[0], "k", "c1")
 	elapsed := time.Since(start)
 
 	require.NoError(t, err, "read should succeed via remote quorum")
@@ -213,7 +213,7 @@ func TestISSUE5_SingleLeader_DeletePropagates(t *testing.T) {
 
 	// Not found on leader and every follower.
 	for _, id := range cluster.NodeIDs {
-		_, err := orch.Read(cluster.ID, id, "del-key", "c1")
+		_, err := orch.Read(context.Background(), cluster.ID, id, "del-key", "c1")
 		assert.Error(t, err, "node %s should report the deleted key as not found", id)
 	}
 }
@@ -238,7 +238,7 @@ func TestISSUE5_Leaderless_DeletePropagates(t *testing.T) {
 	require.NoError(t, orch.Delete(context.Background(), cluster.ID, cluster.NodeIDs[0], "del-key", "c1"))
 	time.Sleep(150 * time.Millisecond)
 
-	_, err = orch.Read(cluster.ID, cluster.NodeIDs[0], "del-key", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, cluster.NodeIDs[0], "del-key", "c1")
 	assert.Error(t, err, "deleted key should read as not found after quorum delete")
 }
 
@@ -271,16 +271,16 @@ func TestISSUE12_Follower_RecoversDroppedEntries(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Confirm the follower is missing the data.
-	_, missErr := orch.Read(cluster.ID, follower, "k1", "c1")
+	_, missErr := orch.Read(context.Background(), cluster.ID, follower, "k1", "c1")
 	require.Error(t, missErr, "precondition: follower should be missing k1 while link is down")
 
 	// Heal the link; the periodic sync loop (1s) should fill the gap.
 	require.NoError(t, orch.ClearNetworkFaults(cluster.ID))
 	time.Sleep(2500 * time.Millisecond)
 
-	_, err = orch.Read(cluster.ID, follower, "k1", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, follower, "k1", "c1")
 	assert.NoError(t, err, "follower should recover k1 via catch-up sync")
-	_, err = orch.Read(cluster.ID, follower, "k2", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, follower, "k2", "c1")
 	assert.NoError(t, err, "follower should recover k2 via catch-up sync")
 }
 
@@ -409,7 +409,7 @@ func TestISSUE9_Leaderless_ReadRepairsCoordinatorLocal(t *testing.T) {
 	require.NoError(t, orch.ResumeNode(cluster.ID, coord))
 
 	// Quorum read from the coordinator sees v2 and must repair its own local copy.
-	res, err := orch.Read(cluster.ID, coord, "k", "c1")
+	res, err := orch.Read(context.Background(), cluster.ID, coord, "k", "c1")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("v2"), res.Entry.(*storage.KVEntry).Value)
 
@@ -454,8 +454,8 @@ func TestISSUE10_MultiLeader_ConcurrentWritesConverge(t *testing.T) {
 
 	// Let anti-entropy converge, then both nodes must agree on the same value.
 	time.Sleep(1500 * time.Millisecond)
-	r0, err0 := orch.Read(cluster.ID, n0, "k", "c")
-	r1, err1 := orch.Read(cluster.ID, n1, "k", "c")
+	r0, err0 := orch.Read(context.Background(), cluster.ID, n0, "k", "c")
+	r1, err1 := orch.Read(context.Background(), cluster.ID, n1, "k", "c")
 	require.NoError(t, err0)
 	require.NoError(t, err1)
 	assert.Equal(t, r0.Entry.(*storage.KVEntry).Value, r1.Entry.(*storage.KVEntry).Value,
@@ -491,7 +491,7 @@ func TestISSUE30_Leaderless_TombstoneNoResurrection(t *testing.T) {
 
 	// Quorum read from n0: n0/n1 have the tombstone (newer), n2 has the stale live value.
 	// The delete must win — read returns not-found, no resurrection.
-	_, err = orch.Read(cluster.ID, n0, "k", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, n0, "k", "c1")
 	assert.Error(t, err, "read after delete must return not-found, not the resurrected live value")
 
 	// n2's stale live value must be repaired to the tombstone (convergence).
@@ -550,7 +550,7 @@ func TestISSUE32_Leaderless_ReadQuorumNotMet(t *testing.T) {
 	require.NoError(t, orch.PauseNode(cluster.ID, n1))
 	require.NoError(t, orch.PauseNode(cluster.ID, n2))
 
-	_, err = orch.Read(cluster.ID, n0, "k", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, n0, "k", "c1")
 	require.Error(t, err, "read must fail when R responses are unreachable")
 	assert.Contains(t, err.Error(), "quorum not met")
 }
@@ -602,7 +602,7 @@ func TestHLC_CausalOrderSurvivesClockSkew(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(300 * time.Millisecond)
 
-	res, err := orch.Read(cluster.ID, coord, "k", "c1")
+	res, err := orch.Read(context.Background(), cluster.ID, coord, "k", "c1")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("v2"), res.Entry.(*storage.KVEntry).Value,
 		"causally-later write must win despite the writer's skewed-behind clock (HLC)")

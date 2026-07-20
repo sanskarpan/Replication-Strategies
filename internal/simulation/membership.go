@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"fmt"
 
 	"replication-strategies/internal/events"
@@ -76,7 +77,7 @@ func (o *Orchestrator) SafeAddNode(clusterID string) (ReconfigureReport, error) 
 	rep.Phases = append(rep.Phases, "phase 1: node added to the ring; old quorum kept uniformly (no mixed config)")
 
 	// --- Phase 2: re-replicate data onto the new node. ---
-	ae, err := o.RunAntiEntropy(clusterID)
+	ae, err := o.RunAntiEntropy(context.Background(), clusterID)
 	if err == nil {
 		rep.Reconciled = ae.Reconciled
 	}

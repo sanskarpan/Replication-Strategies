@@ -30,7 +30,7 @@ func TestSingleLeader_BasicWriteAndRead(t *testing.T) {
 	assert.NotNil(t, result)
 
 	// Read back from leader
-	readResult, err := orch.Read(cluster.ID, cluster.LeaderID, "key1", "client1")
+	readResult, err := orch.Read(context.Background(), cluster.ID, cluster.LeaderID, "key1", "client1")
 	require.NoError(t, err)
 	assert.NotNil(t, readResult)
 }
@@ -84,7 +84,7 @@ func TestSingleLeader_ReplicationPropagates(t *testing.T) {
 		if id == cluster.LeaderID {
 			continue
 		}
-		result, err := orch.Read(cluster.ID, id, "replicated-key", "client1")
+		result, err := orch.Read(context.Background(), cluster.ID, id, "replicated-key", "client1")
 		assert.NoError(t, err, "follower %s should have replicated key", id)
 		_ = result
 	}

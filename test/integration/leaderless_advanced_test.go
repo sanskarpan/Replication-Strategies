@@ -172,7 +172,7 @@ func TestLeaderless_DigestReadReturnsFreshValue(t *testing.T) {
 	time.Sleep(120 * time.Millisecond)
 
 	// Read from a different coordinator so the value must be pulled cross-node.
-	res, err := orch.Read(c.ID, c.NodeIDs[1], "dk", "client1")
+	res, err := orch.Read(context.Background(), c.ID, c.NodeIDs[1], "dk", "client1")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	entry := entryValue(t, res.Entry)
@@ -212,7 +212,7 @@ func TestLeaderless_SyncReadRepairConverges(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// A sync read repairs stale replicas before returning v2.
-	res, err := orch.Read(c.ID, c.NodeIDs[0], "sk", "client1")
+	res, err := orch.Read(context.Background(), c.ID, c.NodeIDs[0], "sk", "client1")
 	require.NoError(t, err)
 	assert.Equal(t, "v2", string(entryValue(t, res.Entry)))
 }
