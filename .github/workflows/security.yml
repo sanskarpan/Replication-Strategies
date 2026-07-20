@@ -27,7 +27,7 @@ jobs:
       - name: Run gosec
         uses: securego/gosec@master
         with:
-          args: ./...
+          args: -conf .gosec.yaml ./...
 
   gitleaks:
     name: gitleaks
