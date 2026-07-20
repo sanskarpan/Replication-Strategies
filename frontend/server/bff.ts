@@ -15,8 +15,48 @@ const upstreams = new Map<string, WebSocket>();
 // src/ changes, so client edits show up on refresh without a server restart. In prod
 // it is bundled once and cached forever.
 const IS_PROD = process.env.NODE_ENV === "production";
+// Opt-in live-reload (HMR-lite): DEV_HMR=1 watches src/ and pushes a reload to the
+// browser on any change. Off by default so the Playwright E2E is never affected.
+const DEV_HMR = !!process.env.DEV_HMR;
 let bundlePromise: Promise<string> | null = null;
 let bundledMtime = 0;
+
+// Live-reload client sockets + a small client snippet injected into index.html in DEV_HMR.
+const liveReloadClients = new Set<{ send: (s: string) => void }>();
+const LIVE_RELOAD_SNIPPET = `
+<script>(function(){
+  try {
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var ws = new WebSocket(proto + "//" + location.host + "/__livereload");
+    ws.onmessage = function(e){ if (e.data === "reload") location.reload(); };
+    ws.onclose = function(){ setTimeout(function(){ location.reload(); }, 1000); };
+  } catch (e) {}
+})();</script>`;
+
+if (DEV_HMR) {
+  const { watch } = await import("node:fs");
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  watch("src", { recursive: true }, () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      bundledMtime = 0; // force a rebuild on next request
+      for (const c of liveReloadClients) {
+        try { c.send("reload"); } catch {}
+      }
+    }, 120);
+  });
+  console.log("live-reload watching src/ (DEV_HMR=1)");
+}
+
+// serveIndex returns index.html, injecting the live-reload client in DEV_HMR mode.
+async function serveIndex(): Promise<Response> {
+  if (!DEV_HMR) return new Response(Bun.file("src/index.html"));
+  const html = await Bun.file("src/index.html").text();
+  const injected = html.includes("</body>")
+    ? html.replace("</body>", `${LIVE_RELOAD_SNIPPET}</body>`)
+    : html + LIVE_RELOAD_SNIPPET;
+  return new Response(injected, { headers: { "Content-Type": "text/html" } });
+}
 
 async function srcMtime(): Promise<number> {
   // Newest mtime across the client source tree.
@@ -81,7 +121,7 @@ const app = new Elysia()
     });
   })
   // Serve static files
-  .get("/", () => Bun.file("src/index.html"))
+  .get("/", () => serveIndex())
   .get("/main.js", async () => {
     try {
       return new Response(await getBundle(), {
@@ -97,6 +137,16 @@ const app = new Elysia()
   .get("/styles.css", () => Bun.file("src/styles/main.css"))
   // Browsers auto-request /favicon.ico; answer 204 so it isn't a console 404.
   .get("/favicon.ico", () => new Response(null, { status: 204 }))
+  // Live-reload channel (DEV_HMR only): the browser connects here and reloads when the
+  // BFF broadcasts "reload" after a source change.
+  .ws("/__livereload", {
+    open(ws) {
+      liveReloadClients.add(ws as unknown as { send: (s: string) => void });
+    },
+    close(ws) {
+      liveReloadClients.delete(ws as unknown as { send: (s: string) => void });
+    },
+  })
   // Proxy the WebSocket event stream to the backend so the browser can stay
   // single-origin (ws://<bff>/ws) instead of hardcoding the backend port.
   .ws("/ws", {
