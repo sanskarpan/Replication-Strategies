@@ -24,6 +24,7 @@
     <span id="ws-status" class="ws-pill" data-state="connecting" title="WebSocket event stream status" role="status" aria-label="WebSocket status">
       <span class="ws-dot"></span><span class="ws-label">connecting</span>
     </span>
+    <span id="replay-badge" class="replay-badge" hidden aria-live="polite"></span>
     <button class="btn btn-sm" id="palette-btn" title="Command palette (Cmd/Ctrl+K)" aria-label="Open command palette">⌘K</button>
     <button class="btn btn-sm" id="help-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
     <button class="btn btn-sm" id="theme-toggle" title="Toggle light/dark theme (t)" aria-label="Toggle theme">◐ Theme</button>
@@ -118,6 +119,18 @@
     </div>
     <div class="panel-body" id="control-body"></div>
   </div>
+
+  <!-- Panel 8: Jepsen Swimlane (EPIC B) -->
+  <div class="panel" id="jepsen-panel" role="region" aria-label="Jepsen operation history">
+    <div class="panel-header">
+      <span>Op History (Jepsen)</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="jepsen-lin-badge" class="jepsen-lin-badge"></span>
+        <button class="btn btn-sm" id="jepsen-refresh-btn" title="Refresh op history">↻</button>
+      </div>
+    </div>
+    <div class="panel-body" id="jepsen-body"></div>
+  </div>
 </div>
 
 <!-- Workload generator + config export/import panel (floating, top-left, collapsible) -->
@@ -184,6 +197,23 @@
       <div class="kbd-row"><kbd>?</kbd><span>Toggle this help</span></div>
       <div class="kbd-row"><kbd>Esc</kbd><span>Close drawer / modal</span></div>
     </div>
+  </div>
+</div>
+
+<!-- Timeline scrubber (EPIC B) — sticky strip at the bottom -->
+<div id="timeline-panel" class="timeline-panel" role="region" aria-label="Event history timeline scrubber">
+  <div class="timeline-controls" aria-label="Playback controls">
+    <button class="btn btn-sm" id="timeline-back-btn" title="Step back one event" aria-label="Step back">◀</button>
+    <button class="btn btn-sm" id="timeline-play-btn" title="Play / pause replay" aria-label="Play">▶</button>
+    <button class="btn btn-sm" id="timeline-fwd-btn" title="Step forward one event" aria-label="Step forward">▶▶</button>
+    <button class="btn btn-sm btn-primary" id="timeline-live-btn" title="Return to live view" aria-label="Live">● Live</button>
+    <span id="timeline-seq-label" class="timeline-seq-label" aria-live="polite">—</span>
+  </div>
+  <div class="timeline-track" aria-label="Event history scrubber">
+    <canvas id="timeline-canvas" class="timeline-canvas" aria-hidden="true"></canvas>
+    <input type="range" id="timeline-thumb" class="timeline-thumb"
+           min="0" max="0" value="0" step="1"
+           aria-label="Scrubber position" />
   </div>
 </div>
 
