@@ -16,6 +16,7 @@ import (
 	"replication-strategies/internal/config"
 	"replication-strategies/internal/events"
 	"replication-strategies/internal/simulation"
+	"replication-strategies/internal/telemetry"
 )
 
 // Build metadata, overridable at link time:
@@ -40,6 +41,17 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 	slog.SetDefault(logger)
 
+	// OpenTelemetry tracing — no-op when OTEL_ENABLED != "true".
+	otelShutdown, err := telemetry.Init(context.Background(), "replsim", version)
+	if err != nil {
+		slog.Error("OTel init failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if serr := otelShutdown(context.Background()); serr != nil {
+			slog.Warn("OTel shutdown error", "error", serr)
+		}
+	}()
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Warn("config load warning (using defaults where needed)", "error", err)
