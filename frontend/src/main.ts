@@ -17,9 +17,12 @@ import { partitionList } from "./components/partitionList";
 import { inspector } from "./components/inspector";
 import { diff } from "./components/diff";
 import { shell, restoreFromPermalink, renderWSStatus } from "./components/shell";
+import { timeline } from "./components/timeline";
+import { jepsen } from "./components/jepsen";
 
 const components = [header, topology, lagTimeline, events, conflicts, violations, quorum,
-  consistency, metrics, latency, cap, control, partitionList, inspector, diff, shell];
+  consistency, metrics, latency, cap, control, partitionList, inspector, diff, shell,
+  timeline, jepsen];
 
 const run = mountAll(components);
 
