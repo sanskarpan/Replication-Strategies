@@ -9,6 +9,10 @@ import type {
   ConvergenceReport,
   NodeStoreSnapshot,
   LogEntry,
+  HistoryResponse,
+  HistoryStateResponse,
+  JepsenOpsResponse,
+  LinearizeResponse,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -96,4 +100,14 @@ export const api = {
   // Scenarios
   listScenarios: () => request<Scenario[]>("GET", "/scenarios"),
   runScenario: (name: string) => request<ClusterState>("POST", `/scenarios/${name}/run`),
+
+  // EPIC B: event history + Jepsen
+  getHistory: (id: string, from = 0, limit = 500) =>
+    request<HistoryResponse>("GET", `/clusters/${id}/history?from=${from}&limit=${limit}`),
+  getHistoryState: (id: string, at: number) =>
+    request<HistoryStateResponse>("GET", `/clusters/${id}/history/state?at=${at}`),
+  getOps: (id: string) =>
+    request<JepsenOpsResponse>("GET", `/clusters/${id}/ops`),
+  getLinearize: (id: string) =>
+    request<LinearizeResponse>("GET", `/clusters/${id}/linearize`),
 };
