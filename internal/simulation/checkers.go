@@ -52,6 +52,16 @@ func (o *Orchestrator) CheckLinearizable(clusterID string) (LinearizabilityRepor
 	return rep, nil
 }
 
+// GetOps returns the raw checker.Op slice recorded for the cluster's linearizability
+// history, for use by the Jepsen swimlane renderer.
+func (o *Orchestrator) GetOps(clusterID string) ([]checker.Op, error) {
+	c, err := o.GetCluster(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	return c.history.Ops(), nil
+}
+
 func kindName(k checker.OpKind) string {
 	if k == checker.OpWrite {
 		return "write"
