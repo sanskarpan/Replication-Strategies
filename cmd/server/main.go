@@ -41,17 +41,8 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 	slog.SetDefault(logger)
 
-	// OpenTelemetry tracing — no-op when OTEL_ENABLED != "true".
-	otelShutdown, err := telemetry.Init(context.Background(), "replsim", version)
-	if err != nil {
-		slog.Error("OTel init failed", "error", err)
-		os.Exit(1)
-	}
-	defer func() {
-		if serr := otelShutdown(context.Background()); serr != nil {
-			slog.Warn("OTel shutdown error", "error", serr)
-		}
-	}()
+	// Load and validate config before starting any long-lived resources so early
+	// failures are fast and the OTel defer below is never skipped by os.Exit.
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Warn("config load warning (using defaults where needed)", "error", err)
@@ -61,6 +52,18 @@ func main() {
 		slog.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
+
+	// OpenTelemetry tracing — no-op when OTEL_ENABLED != "true".
+	otelShutdown, otelErr := telemetry.Init(context.Background(), "replsim", version)
+	if otelErr != nil {
+		slog.Error("OTel init failed", "error", otelErr)
+		os.Exit(1)
+	}
+	defer func() {
+		if serr := otelShutdown(context.Background()); serr != nil {
+			slog.Warn("OTel shutdown error", "error", serr)
+		}
+	}()
 
 	bus := events.NewEventBus(1000)
 	orch := simulation.NewOrchestrator(bus)

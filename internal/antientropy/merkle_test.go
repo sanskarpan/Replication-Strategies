@@ -17,8 +17,10 @@ func TestIdenticalMapsDiffEmpty(t *testing.T) {
 
 func TestDeterministicRoot(t *testing.T) {
 	kv := map[string]string{"z": "9", "a": "1", "m": "5"}
-	if BuildTree(kv).Hash != BuildTree(kv).Hash {
-		t.Fatal("root hash not deterministic across builds")
+	h1 := BuildTree(kv).Hash
+	h2 := BuildTree(kv).Hash
+	if h1 != h2 {
+		t.Fatalf("root hash not deterministic: %q != %q", h1, h2)
 	}
 }
 
