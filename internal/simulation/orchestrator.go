@@ -43,14 +43,14 @@ type ClusterConfig struct {
 
 // Cluster holds all runtime state for one simulated cluster.
 type Cluster struct {
-	mu          sync.RWMutex
-	ID          string                   `json:"id"`
-	Config      ClusterConfig            `json:"config"`
-	Nodes       map[string]node.Node     `json:"-"`
-	NodeIDs     []string                 `json:"node_ids"`
-	LeaderID    string                   `json:"leader_id,omitempty"`
-	Fabric      *transport.NetworkFabric `json:"-"`
-	Metrics     *metrics.ClusterMetrics  `json:"-"`
+	mu           sync.RWMutex
+	ID           string                   `json:"id"`
+	Config       ClusterConfig            `json:"config"`
+	Nodes        map[string]node.Node     `json:"-"`
+	NodeIDs      []string                 `json:"node_ids"`
+	LeaderID     string                   `json:"leader_id,omitempty"`
+	Fabric       *transport.NetworkFabric `json:"-"`
+	Metrics      *metrics.ClusterMetrics  `json:"-"`
 	detector     *failure.Detector        `json:"-"` // phi-accrual failure detector
 	NodeRegions  map[string]int           `json:"-"` // nodeID -> region index (geo)
 	history      *checker.History         `json:"-"` // op history for the linearizability checker

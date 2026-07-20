@@ -26,10 +26,10 @@ func TestLinearizability_SingleLeaderIsLinearizable(t *testing.T) {
 	defer orch.DeleteCluster(c.ID)
 
 	for i, v := range []string{"1", "2", "3"} {
-		_, err := orch.Write(context.Background(), c.ID, c.LeaderID, "k", []byte(v), "client1")
-		require.NoError(t, err)
-		_, err = orch.Read(context.Background(), c.ID, c.LeaderID, "k", "client1")
-		require.NoError(t, err, "read %d", i)
+		_, err2 := orch.Write(context.Background(), c.ID, c.LeaderID, "k", []byte(v), "client1")
+		require.NoError(t, err2)
+		_, err2 = orch.Read(context.Background(), c.ID, c.LeaderID, "k", "client1")
+		require.NoError(t, err2, "read %d", i)
 	}
 
 	rep, err := orch.CheckLinearizable(c.ID)

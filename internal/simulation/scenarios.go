@@ -233,7 +233,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 		// Add 500 ms latency to the last follower.
 		if len(c.NodeIDs) >= 2 {
 			lastFollower := c.NodeIDs[len(c.NodeIDs)-1]
-			o.SetLatency(clusterID, c.LeaderID, lastFollower, 500)
+			_ = o.SetLatency(clusterID, c.LeaderID, lastFollower, 500)
 			for i := 0; i < 5; i++ {
 				o.Write(context.Background(), clusterID, c.LeaderID, fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("val%d", i)), "scenario-client") //nolint:errcheck
 				time.Sleep(100 * time.Millisecond)

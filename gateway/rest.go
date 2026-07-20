@@ -640,10 +640,10 @@ func (s *Server) handleDemoMonotonic(w http.ResponseWriter, r *http.Request) {
 	// v1 replicates everywhere, then readNode is paused so it misses v2.
 	s.orch.Write(r.Context(), id, writeNode, key, []byte("v1"), clientID) //nolint:errcheck
 	time.Sleep(200 * time.Millisecond)
-	s.orch.PauseNode(id, readNode)                           //nolint:errcheck
+	s.orch.PauseNode(id, readNode)                                        //nolint:errcheck
 	s.orch.Write(r.Context(), id, writeNode, key, []byte("v2"), clientID) //nolint:errcheck
-	time.Sleep(120 * time.Millisecond)                       // v2 delivered-and-dropped at paused readNode
-	s.orch.ResumeNode(id, readNode)                          //nolint:errcheck
+	time.Sleep(120 * time.Millisecond)                                    // v2 delivered-and-dropped at paused readNode
+	s.orch.ResumeNode(id, readNode)                                       //nolint:errcheck
 
 	read1, _ := s.orch.Read(r.Context(), id, writeNode, key, clientID) // fresh -> v2
 	read2, _ := s.orch.Read(r.Context(), id, readNode, key, clientID)  // stale -> v1

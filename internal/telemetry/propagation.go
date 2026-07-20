@@ -9,8 +9,8 @@ import (
 // mapCarrier implements propagation.TextMapCarrier over a plain map[string]string.
 type mapCarrier map[string]string
 
-func (m mapCarrier) Get(key string) string      { return m[key] }
-func (m mapCarrier) Set(key, val string)         { m[key] = val }
+func (m mapCarrier) Get(key string) string { return m[key] }
+func (m mapCarrier) Set(key, val string)   { m[key] = val }
 func (m mapCarrier) Keys() []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

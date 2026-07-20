@@ -83,7 +83,7 @@ Examples:
 `)
 }
 
-// cmdListScenarios prints the built-in scenario catalogue.
+// cmdListScenarios prints the built-in scenario catalog.
 func cmdListScenarios(args []string) int {
 	fs := flag.NewFlagSet("list-scenarios", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -238,8 +238,8 @@ func runCheck(orch *simulation.Orchestrator, cfg simulation.ClusterConfig) (bool
 	for i := 0; i < nWrites; i++ {
 		key := fmt.Sprintf("check-key-%d", i)
 		val := []byte(fmt.Sprintf("value-%d", i))
-		if _, err := orch.Write(context.Background(), cluster.ID, "", key, val, clientID); err != nil {
-			fmt.Fprintf(&b, "FAIL: write %s: %v\n", key, err)
+		if _, werr := orch.Write(context.Background(), cluster.ID, "", key, val, clientID); werr != nil {
+			fmt.Fprintf(&b, "FAIL: write %s: %v\n", key, werr)
 			return false, b.String()
 		}
 	}
@@ -249,8 +249,8 @@ func runCheck(orch *simulation.Orchestrator, cfg simulation.ClusterConfig) (bool
 
 	for i := 0; i < nWrites; i++ {
 		key := fmt.Sprintf("check-key-%d", i)
-		if _, err := orch.Read(context.Background(), cluster.ID, "", key, clientID); err != nil {
-			fmt.Fprintf(&b, "FAIL: read %s: %v\n", key, err)
+		if _, werr := orch.Read(context.Background(), cluster.ID, "", key, clientID); werr != nil {
+			fmt.Fprintf(&b, "FAIL: read %s: %v\n", key, werr)
 			return false, b.String()
 		}
 	}

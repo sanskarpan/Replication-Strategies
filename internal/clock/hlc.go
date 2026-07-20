@@ -116,7 +116,7 @@ func (h *HLC) Update(remote int64) int64 {
 	}
 
 	switch {
-	case newPhysical == h.lastPhysical && newPhysical == remotePhysical:
+	case newPhysical == h.lastPhysical && newPhysical == remotePhysical: //nolint:gocritic
 		// Local and remote share the winning physical time: take the larger
 		// logical and advance past it.
 		if remoteLogical > h.logical {

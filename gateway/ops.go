@@ -27,7 +27,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleReadyz is a readiness probe: the orchestrator is initialised and can serve.
+// handleReadyz is a readiness probe: the orchestrator is initialized and can serve.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if s.orch == nil {
 		writeError(w, http.StatusServiceUnavailable, "orchestrator not ready")
