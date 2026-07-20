@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestLeaderless_QuorumWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	result, err := orch.Write(cluster.ID, cluster.NodeIDs[0], "quorum-key", []byte("quorum-value"), "client1")
+	result, err := orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "quorum-key", []byte("quorum-value"), "client1")
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 }
@@ -42,7 +43,7 @@ func TestLeaderless_QuorumRead(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "read-key", []byte("read-value"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "read-key", []byte("read-value"), "client1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
@@ -65,7 +66,7 @@ func TestLeaderless_AllNodesAcceptCoordinatorWrites(t *testing.T) {
 
 	for i, id := range cluster.NodeIDs {
 		key := "key-coordinator-" + id
-		_, err := orch.Write(cluster.ID, id, key, []byte("val"), "client1")
+		_, err := orch.Write(context.Background(), cluster.ID, id, key, []byte("val"), "client1")
 		assert.NoError(t, err, "node %d should accept writes as coordinator", i)
 	}
 }
@@ -98,7 +99,7 @@ func TestLeaderless_ReadRepairEmitted(t *testing.T) {
 	defer orch.DeleteCluster(cluster.ID)
 
 	// Write to establish base
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "repair-key", []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "repair-key", []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
@@ -108,7 +109,7 @@ func TestLeaderless_ReadRepairEmitted(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Write new value (won't reach paused nodes)
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "repair-key", []byte("v2"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "repair-key", []byte("v2"), "client1")
 	require.NoError(t, err)
 	time.Sleep(50 * time.Millisecond)
 

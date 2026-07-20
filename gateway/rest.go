@@ -292,7 +292,7 @@ func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "key is required")
 		return
 	}
-	result, err := s.orch.Write(id, req.TargetNodeID, req.Key, []byte(req.Value), req.ClientID)
+	result, err := s.orch.Write(r.Context(), id, req.TargetNodeID, req.Key, []byte(req.Value), req.ClientID)
 	if err != nil {
 		// Write failures here are client/operational (wrong target, paused node,
 		// unmet quorum), not internal server faults.
@@ -311,7 +311,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "key is required")
 		return
 	}
-	if err := s.orch.Delete(id, nodeID, key, clientID); err != nil {
+	if err := s.orch.Delete(r.Context(), id, nodeID, key, clientID); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -368,7 +368,7 @@ func (s *Server) handleWriteBatch(w http.ResponseWriter, r *http.Request) {
 		if clientID == "" {
 			clientID = e.ClientID
 		}
-		result, err := s.orch.Write(id, e.TargetNodeID, e.Key, []byte(e.Value), clientID)
+		result, err := s.orch.Write(r.Context(), id, e.TargetNodeID, e.Key, []byte(e.Value), clientID)
 		if err != nil {
 			results = append(results, map[string]string{"error": err.Error(), "key": e.Key})
 		} else {
@@ -593,7 +593,7 @@ func (s *Server) handleDemoRYW(w http.ResponseWriter, r *http.Request) {
 	// and immediately read — the replica hasn't caught up yet. (Pause/resume avoids the
 	// FIFO link-latency lingering between successive demo runs.)
 	s.orch.PauseNode(id, readNode) //nolint:errcheck
-	writeRes, werr := s.orch.Write(id, writeNode, key, []byte(value), clientID)
+	writeRes, werr := s.orch.Write(r.Context(), id, writeNode, key, []byte(value), clientID)
 	if werr != nil {
 		s.orch.ResumeNode(id, readNode) //nolint:errcheck
 		writeError(w, http.StatusConflict, werr.Error())
@@ -638,10 +638,10 @@ func (s *Server) handleDemoMonotonic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// v1 replicates everywhere, then readNode is paused so it misses v2.
-	s.orch.Write(id, writeNode, key, []byte("v1"), clientID) //nolint:errcheck
+	s.orch.Write(r.Context(), id, writeNode, key, []byte("v1"), clientID) //nolint:errcheck
 	time.Sleep(200 * time.Millisecond)
 	s.orch.PauseNode(id, readNode)                           //nolint:errcheck
-	s.orch.Write(id, writeNode, key, []byte("v2"), clientID) //nolint:errcheck
+	s.orch.Write(r.Context(), id, writeNode, key, []byte("v2"), clientID) //nolint:errcheck
 	time.Sleep(120 * time.Millisecond)                       // v2 delivered-and-dropped at paused readNode
 	s.orch.ResumeNode(id, readNode)                          //nolint:errcheck
 
@@ -690,7 +690,7 @@ func (s *Server) handleDemoConsistentPrefix(w http.ResponseWriter, r *http.Reque
 	key := "prefix-demo-key"
 	results := make([]interface{}, 0, len(seq))
 	for _, v := range seq {
-		res, _ := s.orch.Write(id, writeNode, key, []byte(v), clientID)
+		res, _ := s.orch.Write(r.Context(), id, writeNode, key, []byte(v), clientID)
 		results = append(results, res)
 	}
 	time.Sleep(150 * time.Millisecond)

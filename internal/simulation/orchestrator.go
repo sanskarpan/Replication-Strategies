@@ -7,6 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	oteltrace "go.opentelemetry.io/otel/trace"
+
 	"replication-strategies/internal/checker"
 	"replication-strategies/internal/conflict"
 	"replication-strategies/internal/events"
@@ -15,6 +19,7 @@ import (
 	"replication-strategies/internal/node"
 	"replication-strategies/internal/quorum"
 	"replication-strategies/internal/storage"
+	"replication-strategies/internal/telemetry"
 	"replication-strategies/internal/transport"
 )
 
@@ -694,11 +699,25 @@ type ReadResult struct {
 }
 
 // Write sends a write to the specified node (or the leader if nodeID is empty).
-func (o *Orchestrator) Write(clusterID, nodeID, key string, value []byte, clientID string) (*WriteResult, error) {
+func (o *Orchestrator) Write(ctx context.Context, clusterID, nodeID, key string, value []byte, clientID string) (*WriteResult, error) {
+	ctx, span := telemetry.Tracer().Start(ctx, "orchestrator.write",
+		oteltrace.WithAttributes(
+			attribute.String("cluster_id", clusterID),
+			attribute.String("node_id", nodeID),
+			attribute.String("key", key),
+			attribute.String("client_id", clientID),
+		),
+	)
+	defer span.End()
+
 	c, err := o.GetCluster(clusterID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	span.SetAttributes(attribute.String("strategy", string(c.Config.Strategy)))
+
 	if nodeID == "" && c.Config.Strategy == node.StrategyRaft {
 		nodeID = o.waitForRaftLeader(c)
 	}
@@ -716,12 +735,18 @@ func (o *Orchestrator) Write(clusterID, nodeID, key string, value []byte, client
 	c.mu.RUnlock()
 
 	if targetNode == nil {
-		return nil, fmt.Errorf("no target node available")
+		err = fmt.Errorf("no target node available")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
+	span.SetAttributes(attribute.String("target_node_id", targetNode.ID()))
 
 	invoke := time.Now().UnixNano()
 	entry, err := targetNode.Write(key, value, clientID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 	// Record the write in the op history for the linearizability checker.
@@ -731,6 +756,17 @@ func (o *Orchestrator) Write(clusterID, nodeID, key string, value []byte, client
 	})
 
 	c.Metrics.IncrWrites()
+
+	// Propagate the trace context into the write_received event so
+	// subscribers can link follow-up spans (e.g. history drain).
+	writeEvt := events.Event{
+		Type:         events.EvtWriteReceived,
+		ClusterID:    clusterID,
+		NodeID:       targetNode.ID(),
+		Data:         map[string]interface{}{"key": key},
+		TraceCarrier: telemetry.InjectCarrier(ctx),
+	}
+	o.bus.Publish(writeEvt)
 
 	return &WriteResult{Entry: entry, NodeID: targetNode.ID()}, nil
 }
@@ -762,9 +798,20 @@ func (o *Orchestrator) WriteBatchAtomic(clusterID, nodeID string, pairs []node.K
 }
 
 // Delete sends a delete to the specified node (or the leader if nodeID is empty).
-func (o *Orchestrator) Delete(clusterID, nodeID, key, clientID string) error {
+func (o *Orchestrator) Delete(ctx context.Context, clusterID, nodeID, key, clientID string) error {
+	_, span := telemetry.Tracer().Start(ctx, "orchestrator.delete",
+		oteltrace.WithAttributes(
+			attribute.String("cluster_id", clusterID),
+			attribute.String("key", key),
+			attribute.String("client_id", clientID),
+		),
+	)
+	defer span.End()
+
 	c, err := o.GetCluster(clusterID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	if nodeID == "" && c.Config.Strategy == node.StrategyRaft {
@@ -782,9 +829,14 @@ func (o *Orchestrator) Delete(clusterID, nodeID, key, clientID string) error {
 	c.mu.RUnlock()
 
 	if targetNode == nil {
-		return fmt.Errorf("no target node available")
+		err = fmt.Errorf("no target node available")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 	if err := targetNode.Delete(key, clientID); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	c.Metrics.IncrWrites()

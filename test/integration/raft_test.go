@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestRaft_ElectsLeaderReplicatesAndFailsOver(t *testing.T) {
 		"a leader must be elected")
 
 	// 2. A write (auto-routed to the leader) commits and is readable.
-	_, err = orch.Write(cluster.ID, "", "k", []byte("v1"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, "", "k", []byte("v1"), "c1")
 	require.NoError(t, err)
 	res, err := orch.Read(cluster.ID, "", "k", "c1")
 	require.NoError(t, err)
@@ -69,7 +70,7 @@ func TestRaft_ElectsLeaderReplicatesAndFailsOver(t *testing.T) {
 	}, 3*time.Second, 30*time.Millisecond, "a new leader must take over after failover")
 
 	// 5. Writes resume on the new leader and remain readable.
-	_, err = orch.Write(cluster.ID, "", "k2", []byte("v2"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, "", "k2", []byte("v2"), "c1")
 	require.NoError(t, err, "writes resume after failover")
 	res2, err := orch.Read(cluster.ID, "", "k2", "c1")
 	require.NoError(t, err)
@@ -100,7 +101,7 @@ func TestRaft_WriteNotLeaderRejected(t *testing.T) {
 			break
 		}
 	}
-	_, err = orch.Write(cluster.ID, follower, "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, follower, "k", []byte("v"), "c1")
 	assert.Error(t, err, "a follower must reject writes and redirect to the leader")
 }
 
@@ -125,7 +126,7 @@ func TestRaft_SnapshotCatchUp(t *testing.T) {
 	// Take the follower offline, then write past the compaction threshold (30).
 	require.NoError(t, orch.PauseNode(cluster.ID, follower))
 	for i := 0; i < 45; i++ {
-		_, err := orch.Write(cluster.ID, "", "k", []byte(fmt.Sprintf("v%d", i)), "c1")
+		_, err := orch.Write(context.Background(), cluster.ID, "", "k", []byte(fmt.Sprintf("v%d", i)), "c1")
 		require.NoError(t, err)
 	}
 

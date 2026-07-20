@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestMultiLeader_AllNodesAcceptWrites(t *testing.T) {
 	// Write to each node
 	for i, nodeID := range cluster.NodeIDs {
 		key := "key-from-" + nodeID
-		_, err := orch.Write(cluster.ID, nodeID, key, []byte("value"), "client1")
+		_, err := orch.Write(context.Background(), cluster.ID, nodeID, key, []byte("value"), "client1")
 		assert.NoError(t, err, "node %d (%s) should accept write", i, nodeID)
 	}
 }
@@ -70,7 +71,7 @@ func TestMultiLeader_ConflictDetection(t *testing.T) {
 
 	// Write same key from multiple nodes (creates conflict)
 	for _, nodeID := range cluster.NodeIDs {
-		orch.Write(cluster.ID, nodeID, "conflict-key", []byte("val-from-"+nodeID), "client-"+nodeID)
+		orch.Write(context.Background(), cluster.ID, nodeID, "conflict-key", []byte("val-from-"+nodeID), "client-"+nodeID)
 	}
 
 	// Heal partitions
@@ -105,12 +106,12 @@ func TestMultiLeader_VectorClockOrdering(t *testing.T) {
 	n2 := cluster.NodeIDs[1]
 
 	// Sequential writes: n1 writes first, then n2 reads and writes
-	_, err = orch.Write(cluster.ID, n1, "ordered-key", []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, n1, "ordered-key", []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(50 * time.Millisecond)
 
 	// n2 writes a new value for the same key — this should NOT conflict
 	// because it's a causally later write
-	_, err = orch.Write(cluster.ID, n2, "ordered-key", []byte("v2"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, n2, "ordered-key", []byte("v2"), "client1")
 	require.NoError(t, err)
 }

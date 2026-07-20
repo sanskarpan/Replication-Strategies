@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -80,11 +81,11 @@ func TestStress_SustainedConcurrency(t *testing.T) {
 			key := fmt.Sprintf("k%d", rng.Intn(20))
 			switch rng.Intn(10) {
 			case 0, 1, 2, 3:
-				_, _ = orch.Write(c.ID, target, key, []byte(fmt.Sprintf("v%d", rng.Intn(1000))), fmt.Sprintf("c%d", seed))
+				_, _ = orch.Write(context.Background(), c.ID, target, key, []byte(fmt.Sprintf("v%d", rng.Intn(1000))), fmt.Sprintf("c%d", seed))
 			case 4, 5, 6:
 				_, _ = orch.Read(c.ID, target, key, fmt.Sprintf("c%d", seed))
 			case 7:
-				_ = orch.Delete(c.ID, target, key, fmt.Sprintf("c%d", seed))
+				_ = orch.Delete(context.Background(), c.ID, target, key, fmt.Sprintf("c%d", seed))
 			case 8:
 				_ = orch.PauseNode(c.ID, target)
 				_ = orch.ResumeNode(c.ID, target)
@@ -128,7 +129,7 @@ func TestStress_SustainedConcurrency(t *testing.T) {
 	}
 	coord := ml.GetState().NodeIDs[0]
 	for k := 0; k < 20; k++ {
-		_, _ = orch.Write(ml.ID, coord, fmt.Sprintf("k%d", k), []byte("final"), "converger")
+		_, _ = orch.Write(context.Background(), ml.ID, coord, fmt.Sprintf("k%d", k), []byte("final"), "converger")
 	}
 	time.Sleep(2 * time.Second) // several anti-entropy ticks
 

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestLinearizability_SingleLeaderIsLinearizable(t *testing.T) {
 	defer orch.DeleteCluster(c.ID)
 
 	for i, v := range []string{"1", "2", "3"} {
-		_, err := orch.Write(c.ID, c.LeaderID, "k", []byte(v), "client1")
+		_, err := orch.Write(context.Background(), c.ID, c.LeaderID, "k", []byte(v), "client1")
 		require.NoError(t, err)
 		_, err = orch.Read(c.ID, c.LeaderID, "k", "client1")
 		require.NoError(t, err, "read %d", i)
@@ -60,7 +61,7 @@ func TestAntiEntropy_ReconcilesDivergentReplicas(t *testing.T) {
 	partID, err := orch.InjectPartition(c.ID, c.NodeIDs[:1], c.NodeIDs[1:])
 	require.NoError(t, err)
 	time.Sleep(20 * time.Millisecond)
-	_, err = orch.Write(c.ID, c.NodeIDs[0], "ae-key", []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), c.ID, c.NodeIDs[0], "ae-key", []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(20 * time.Millisecond)
 	// Heal the partition; anti-entropy runs before the 2s hinted-handoff ticker fires.
@@ -88,7 +89,7 @@ func TestSafeReconfigure_PreservesDataAndOverlap(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(c.ID)
 
-	_, err = orch.Write(c.ID, c.NodeIDs[0], "rk", []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), c.ID, c.NodeIDs[0], "rk", []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 

@@ -25,7 +25,7 @@ func TestSingleLeader_BasicWriteAndRead(t *testing.T) {
 	defer orch.DeleteCluster(cluster.ID)
 
 	// Write to leader
-	result, err := orch.Write(cluster.ID, cluster.LeaderID, "key1", []byte("value1"), "client1")
+	result, err := orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "key1", []byte("value1"), "client1")
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 
@@ -57,7 +57,7 @@ func TestSingleLeader_FollowerRefusesWrite(t *testing.T) {
 	}
 	require.NotEmpty(t, followerID)
 
-	_, err = orch.Write(cluster.ID, followerID, "key1", []byte("value1"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, followerID, "key1", []byte("value1"), "client1")
 	assert.Error(t, err, "follower should reject writes")
 }
 
@@ -73,7 +73,7 @@ func TestSingleLeader_ReplicationPropagates(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "replicated-key", []byte("replicated-value"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "replicated-key", []byte("replicated-value"), "client1")
 	require.NoError(t, err)
 
 	// Give async replication time to propagate
@@ -144,7 +144,7 @@ func TestSingleLeader_NetworkPartition(t *testing.T) {
 	assert.NotEmpty(t, partID)
 
 	// Leader can still write (locally)
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "partition-key", []byte("value"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "partition-key", []byte("value"), "client1")
 	require.NoError(t, err)
 
 	// Heal

@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"testing"
 
 	"replication-strategies/internal/events"
@@ -88,7 +89,7 @@ func TestGradeChallenge_LeaderlessStrongVsWeak(t *testing.T) {
 	}
 	defer o.DeleteCluster(strong.ID)
 
-	if _, err := o.Write(strong.ID, "", "k", []byte("v"), "client-1"); err != nil {
+	if _, err := o.Write(context.Background(), strong.ID, "", "k", []byte("v"), "client-1"); err != nil {
 		t.Fatalf("Write(strong): %v", err)
 	}
 
@@ -113,7 +114,7 @@ func TestGradeChallenge_LeaderlessStrongVsWeak(t *testing.T) {
 	}
 	defer o.DeleteCluster(weak.ID)
 
-	if _, err := o.Write(weak.ID, "", "k", []byte("v"), "client-1"); err != nil {
+	if _, err := o.Write(context.Background(), weak.ID, "", "k", []byte("v"), "client-1"); err != nil {
 		t.Fatalf("Write(weak): %v", err)
 	}
 

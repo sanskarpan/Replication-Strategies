@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -237,7 +238,7 @@ func runCheck(orch *simulation.Orchestrator, cfg simulation.ClusterConfig) (bool
 	for i := 0; i < nWrites; i++ {
 		key := fmt.Sprintf("check-key-%d", i)
 		val := []byte(fmt.Sprintf("value-%d", i))
-		if _, err := orch.Write(cluster.ID, "", key, val, clientID); err != nil {
+		if _, err := orch.Write(context.Background(), cluster.ID, "", key, val, clientID); err != nil {
 			fmt.Fprintf(&b, "FAIL: write %s: %v\n", key, err)
 			return false, b.String()
 		}

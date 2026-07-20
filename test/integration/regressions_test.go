@@ -4,6 +4,7 @@ package integration
 // Each test is named after the bug it covers.
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestRegression_SingleLeader_SyncAcksReceived(t *testing.T) {
 	// A sync write must complete within a reasonable time — if acks were
 	// never delivered the Write would block until the 2 s timeout.
 	start := time.Now()
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "sync-key", []byte("sync-val"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "sync-key", []byte("sync-val"), "c1")
 	elapsed := time.Since(start)
 	require.NoError(t, err)
 
@@ -57,7 +58,7 @@ func TestRegression_SingleLeader_SemiSyncAcksReceived(t *testing.T) {
 	defer orch.DeleteCluster(cluster.ID)
 
 	start := time.Now()
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "semisync-key", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "semisync-key", []byte("v"), "c1")
 	elapsed := time.Since(start)
 	require.NoError(t, err)
 	assert.Less(t, elapsed, 400*time.Millisecond,
@@ -84,7 +85,7 @@ func TestRegression_Leaderless_W1_DataReplicates(t *testing.T) {
 	peer1 := cluster.NodeIDs[1]
 	peer2 := cluster.NodeIDs[2]
 
-	_, err = orch.Write(cluster.ID, coordinator, "w1-key", []byte("hello"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, coordinator, "w1-key", []byte("hello"), "c1")
 	require.NoError(t, err)
 
 	// Give async replication a moment.
@@ -122,7 +123,7 @@ func TestRegression_Leaderless_W1_PeerCanRead(t *testing.T) {
 	coordinator := cluster.NodeIDs[0]
 	peer := cluster.NodeIDs[1]
 
-	_, err = orch.Write(cluster.ID, coordinator, "peer-key", []byte("val"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, coordinator, "peer-key", []byte("val"), "c1")
 	require.NoError(t, err)
 	time.Sleep(150 * time.Millisecond)
 
@@ -161,7 +162,7 @@ func TestRegression_Leaderless_ReadRepair_TargetsStaleResponder(t *testing.T) {
 	defer orch.DeleteCluster(cluster.ID)
 
 	// Write initial value — reaches at least 3 nodes.
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "repair-tgt-key", []byte("v1"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "repair-tgt-key", []byte("v1"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
@@ -171,7 +172,7 @@ func TestRegression_Leaderless_ReadRepair_TargetsStaleResponder(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Write new value; paused nodes don't see it.
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "repair-tgt-key", []byte("v2"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "repair-tgt-key", []byte("v2"), "c1")
 	require.NoError(t, err)
 	time.Sleep(50 * time.Millisecond)
 
@@ -219,7 +220,7 @@ func TestRegression_MultiLeader_VCMonotonicity(t *testing.T) {
 	errs := make(chan error, iterations)
 	for i := 0; i < iterations; i++ {
 		go func() {
-			_, e := orch.Write(cluster.ID, n1, "mono-key", []byte("v"), "c1")
+			_, e := orch.Write(context.Background(), cluster.ID, n1, "mono-key", []byte("v"), "c1")
 			errs <- e
 		}()
 	}

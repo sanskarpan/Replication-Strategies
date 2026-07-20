@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ func TestLeaderless_PreferenceListRouting(t *testing.T) {
 	require.Len(t, pref, 3)
 
 	// Coordinate the write through the first preference-list replica.
-	_, err = orch.Write(cluster.ID, pref[0], key, []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), cluster.ID, pref[0], key, []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(150 * time.Millisecond)
 
@@ -97,7 +98,7 @@ func TestLeaderless_SloppyQuorumMeetsWDuringFailure(t *testing.T) {
 	require.NoError(t, o1.PauseNode(c1.ID, pref1[1]))
 	require.NoError(t, o1.PauseNode(c1.ID, pref1[2]))
 	time.Sleep(30 * time.Millisecond)
-	_, err := o1.Write(c1.ID, pref1[0], "hot", []byte("v1"), "client1")
+	_, err := o1.Write(context.Background(), c1.ID, pref1[0], "hot", []byte("v1"), "client1")
 	assert.NoError(t, err, "sloppy quorum should meet W via healthy stand-in nodes")
 
 	// Sloppy OFF: the same failure must fail the write (only the coordinator can ack).
@@ -106,7 +107,7 @@ func TestLeaderless_SloppyQuorumMeetsWDuringFailure(t *testing.T) {
 	require.NoError(t, o2.PauseNode(c2.ID, pref2[1]))
 	require.NoError(t, o2.PauseNode(c2.ID, pref2[2]))
 	time.Sleep(30 * time.Millisecond)
-	_, err = o2.Write(c2.ID, pref2[0], "hot", []byte("v1"), "client1")
+	_, err = o2.Write(context.Background(), c2.ID, pref2[0], "hot", []byte("v1"), "client1")
 	assert.Error(t, err, "without sloppy quorum the write should fail to meet W")
 }
 
@@ -143,7 +144,7 @@ func TestLeaderless_LocalQuorumSurvivesRegionPartition(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 
 		// Coordinate from a region-0 node; only its region is reachable.
-		_, werr := orch.Write(c.ID, r0[0], "geo-key", []byte("v1"), "client1")
+		_, werr := orch.Write(context.Background(), c.ID, r0[0], "geo-key", []byte("v1"), "client1")
 		return werr
 	}
 
@@ -166,7 +167,7 @@ func TestLeaderless_DigestReadReturnsFreshValue(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(c.ID)
 
-	_, err = orch.Write(c.ID, c.NodeIDs[0], "dk", []byte("hello"), "client1")
+	_, err = orch.Write(context.Background(), c.ID, c.NodeIDs[0], "dk", []byte("hello"), "client1")
 	require.NoError(t, err)
 	time.Sleep(120 * time.Millisecond)
 
@@ -194,7 +195,7 @@ func TestLeaderless_SyncReadRepairConverges(t *testing.T) {
 	defer orch.DeleteCluster(c.ID)
 
 	// Seed a value everywhere.
-	_, err = orch.Write(c.ID, c.NodeIDs[0], "sk", []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), c.ID, c.NodeIDs[0], "sk", []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(150 * time.Millisecond)
 
@@ -203,7 +204,7 @@ func TestLeaderless_SyncReadRepairConverges(t *testing.T) {
 		require.NoError(t, orch.PauseNode(c.ID, id))
 	}
 	time.Sleep(20 * time.Millisecond)
-	_, err = orch.Write(c.ID, c.NodeIDs[0], "sk", []byte("v2"), "client1")
+	_, err = orch.Write(context.Background(), c.ID, c.NodeIDs[0], "sk", []byte("v2"), "client1")
 	require.NoError(t, err)
 	for _, id := range c.NodeIDs[1:] {
 		require.NoError(t, orch.ResumeNode(c.ID, id))

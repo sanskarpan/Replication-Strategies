@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -151,7 +152,7 @@ func (o *Orchestrator) runScenarioSpecSteps(clusterID string, spec *ScenarioSpec
 
 		switch step.Action {
 		case "write":
-			o.Write(clusterID, resolveNode(c, step.Node), step.Key, []byte(step.Value), "spec-client") //nolint:errcheck
+			o.Write(context.Background(), clusterID, resolveNode(c, step.Node), step.Key, []byte(step.Value), "spec-client") //nolint:errcheck
 		case "read":
 			o.Read(clusterID, resolveNode(c, step.Node), step.Key, "spec-client") //nolint:errcheck
 		case "pause":
