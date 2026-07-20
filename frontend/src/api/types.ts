@@ -183,3 +183,54 @@ export interface DemoPrefixResult {
   writes: WriteResult[];
   prefix: string;
 }
+
+// ─── EPIC B: event history + Jepsen swimlane ────────────────────────────────
+
+export interface HistoryEntry {
+  seq: number;
+  event: SimEvent;
+  // Present at periodic snapshot points or after structural events.
+  state?: ClusterState;
+}
+
+export interface HistoryResponse {
+  cluster_id: string;
+  max_seq: number;
+  entries: HistoryEntry[];
+}
+
+export interface HistoryStateResponse {
+  base_seq: number;
+  base_state: ClusterState | null;
+  tail: HistoryEntry[];
+  max_seq: number;
+}
+
+export type JepsenOpKind = "write" | "read";
+
+export interface JepsenOp {
+  client_id: string;
+  kind: JepsenOpKind;
+  key: string;
+  value: string;
+  invoke_ns: number;
+  complete_ns: number;
+}
+
+export interface JepsenOpsResponse {
+  cluster_id: string;
+  ops: JepsenOp[];
+}
+
+export interface LinearizeResponse {
+  cluster_id: string;
+  ops: number;
+  linearizable: boolean;
+  violation?: {
+    client_id: string;
+    kind: string;
+    key: string;
+    value: string;
+  };
+  note?: string;
+}
