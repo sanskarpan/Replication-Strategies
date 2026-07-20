@@ -115,7 +115,7 @@ function renderControl() {
     const sel = req<HTMLSelectElement>("scenario-select");
     for (const s of scenarios) {
       const opt = document.createElement("option");
-      opt.value = s.name;
+      opt.value = s.name ?? "";
       opt.textContent = `${s.name} (${s.strategy})`;
       sel.appendChild(opt);
     }

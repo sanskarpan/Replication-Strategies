@@ -119,7 +119,7 @@ function renderConsistency(cluster: ClusterState) {
   byId("demo-prefix-btn")?.addEventListener("click", async () => {
     try {
       const res = await api.demoConsistentPrefix(cluster.id);
-      resultEl().textContent = `Prefix: wrote ${res.writes.length} keys in order, consistency="${res.prefix}"`;
+      resultEl().textContent = `Prefix: wrote ${res.writes?.length ?? 0} keys in order, consistent=${res.consistent ?? false}`;
     } catch (e: unknown) {
       resultEl().textContent = e instanceof Error ? e.message : String(e);
     }

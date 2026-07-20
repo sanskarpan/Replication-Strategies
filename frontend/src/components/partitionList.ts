@@ -12,7 +12,7 @@ export function renderPartitionList(clusterId: string) {
   if (parts.length === 0) { el.innerHTML = ""; return; }
   el.innerHTML = parts.map((p) =>
     `<span style="background:var(--danger);opacity:0.7;padding:1px 6px;border-radius:3px;cursor:pointer" data-pid="${p.id}" title="Heal partition">
-      ✗ [${Object.keys(p.group_a).map(id => id.split("-").pop()).join(",")}] | [${Object.keys(p.group_b).map(id => id.split("-").pop()).join(",")}]
+      ✗ [${Object.keys(p.group_a ?? {}).map(id => id.split("-").pop()).join(",")}] | [${Object.keys(p.group_b ?? {}).map(id => id.split("-").pop()).join(",")}]
     </span>`
   ).join("");
   el.querySelectorAll("span[data-pid]").forEach((span) => {

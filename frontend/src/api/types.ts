@@ -1,8 +1,35 @@
-export type ReplicationStrategy = "single_leader" | "multi_leader" | "leaderless" | "raft";
+import type { components } from "./generated";
+
+// ─── Enum types from OpenAPI spec ────────────────────────────────────────────
+
+export type ReplicationStrategy = components["schemas"]["ReplicationStrategy"];
+export type ReplicationMode = components["schemas"]["ReplicationMode"];
+export type ConflictResolverType = components["schemas"]["ConflictResolver"];
+
+// ─── Schema types from OpenAPI spec ──────────────────────────────────────────
+
+export type KVEntry = components["schemas"]["KVEntry"];
+export type NodeStatus = components["schemas"]["NodeStatus"];
+export type Partition = components["schemas"]["Partition"];
+export type ClusterState = components["schemas"]["ClusterState"];
+export type Scenario = components["schemas"]["Scenario"];
+export type KeyDivergence = components["schemas"]["KeyDivergence"];
+export type ConvergenceReport = components["schemas"]["ConvergenceReport"];
+export type WriteResult = components["schemas"]["WriteResult"];
+export type ReadResult = components["schemas"]["ReadResult"];
+
+// Demo report aliases (backend schema names mapped to frontend API surface)
+export type DemoRYWResult = components["schemas"]["ReadYourWritesReport"];
+export type DemoMonotonicResult = components["schemas"]["MonotonicReadsReport"];
+export type DemoPrefixResult = components["schemas"]["ConsistentPrefixReport"];
+
+export type LinearizeResponse = components["schemas"]["LinearizabilityReport"];
+
+// ─── Frontend-only types (no corresponding OpenAPI schema) ───────────────────
+
 export type NodeRole = "leader" | "follower" | "replica" | "primary";
 export type NodeState = "online" | "offline" | "paused";
-export type ReplicationMode = "async" | "sync" | "semi_sync";
-export type ConflictResolverType = "lww" | "vector_clock" | "crdt";
+
 export type EventType =
   | "follower_lag"
   | "conflict_detected"
@@ -23,29 +50,8 @@ export interface VectorClock {
   [nodeId: string]: number;
 }
 
-export interface KVEntry {
-  key: string;
-  value: string | Uint8Array;
-  vclock?: VectorClock;
-  timestamp: number;
-  node_id: string;
-  tombstone?: boolean;
-  version: number;
-}
-
-export interface NodeStatus {
-  id: string;
-  cluster_id: string;
-  strategy: ReplicationStrategy;
-  role: NodeRole;
-  state: NodeState;
-  commit_index: number;
-  last_applied: number;
-  leader_id?: string;
-  peers: string[];
-  lag: number;
-}
-
+// NodeMetrics and LagSample are not part of the OpenAPI spec — the backend
+// returns ClusterMetrics as an opaque map; these types describe the known shape.
 export interface NodeMetrics {
   node_id: string;
   writes_total: number;
@@ -56,7 +62,6 @@ export interface NodeMetrics {
   read_latency_ms: number[];
   is_leader: boolean;
   is_online: boolean;
-  // Percentiles populated server-side (averages hide tail behaviour).
   write_p50?: number;
   write_p95?: number;
   write_p99?: number;
@@ -72,6 +77,8 @@ export interface LagSample {
   timestamp: string;
 }
 
+// The spec describes ClusterMetrics as an open map; this interface captures the
+// known fields without conflicting with the generated opaque type.
 export interface ClusterMetrics {
   cluster_id: string;
   strategy: string;
@@ -83,32 +90,6 @@ export interface ClusterMetrics {
   start_time: string;
 }
 
-export interface Partition {
-  id: string;
-  group_a: Record<string, boolean>;
-  group_b: Record<string, boolean>;
-}
-
-export interface ClusterState {
-  id: string;
-  config: {
-    strategy: ReplicationStrategy;
-    node_count: number;
-    replication_mode?: ReplicationMode;
-    conflict_resolver?: ConflictResolverType;
-    quorum_n?: number;
-    quorum_w?: number;
-    quorum_r?: number;
-  };
-  node_ids: string[];
-  leader_id?: string;
-  nodes: Record<string, NodeStatus>;
-  metrics: ClusterMetrics;
-  created: string;
-  partitions: Record<string, Partition>;
-  dropped_messages?: number;
-}
-
 export interface SimEvent {
   type: EventType;
   cluster_id: string;
@@ -117,71 +98,20 @@ export interface SimEvent {
   data?: Record<string, unknown>;
 }
 
-export interface Scenario {
-  name: string;
-  strategy: ReplicationStrategy;
-  description: string;
-  node_count: number;
-}
-
-export interface KeyDivergence {
-  key: string;
-  values: Record<string, string>; // nodeID -> base64 value | "<tombstone>" | "<absent>"
-}
-
-export interface ConvergenceReport {
-  cluster_id: string;
-  converged: boolean;
-  keys: number;
-  diverged?: KeyDivergence[];
-  note?: string;
-}
-
 // Store snapshot returned by GET .../nodes/{nodeId}/store — map keyed by key.
 export type NodeStoreSnapshot = Record<string, KVEntry>;
 
 // Log snapshot returned by GET .../nodes/{nodeId}/log.
+// The spec describes LogEntry as an open map; this interface captures the known fields.
 export interface LogEntry {
   index: number;
   term: number;
   key: string;
   value: string; // base64
-  op: number | string; // numeric op enum from the backend
+  op: number | string;
   timestamp: number;
   origin_id: string;
   vclock?: VectorClock;
-}
-
-export interface WriteResult {
-  entry: KVEntry;
-  node_id: string;
-}
-
-export interface ReadResult {
-  entry: KVEntry;
-  node_id: string;
-}
-
-export interface DemoRYWResult {
-  client_id: string;
-  write_key: string;
-  write_value: string;
-  write_result: WriteResult;
-  read_result: ReadResult;
-  consistent: boolean;
-}
-
-export interface DemoMonotonicResult {
-  client_id: string;
-  read1: ReadResult;
-  read2: ReadResult;
-  monotonic: boolean;
-}
-
-export interface DemoPrefixResult {
-  client_id: string;
-  writes: WriteResult[];
-  prefix: string;
 }
 
 // ─── EPIC B: event history + Jepsen swimlane ────────────────────────────────
@@ -189,7 +119,6 @@ export interface DemoPrefixResult {
 export interface HistoryEntry {
   seq: number;
   event: SimEvent;
-  // Present at periodic snapshot points or after structural events.
   state?: ClusterState;
 }
 
@@ -220,17 +149,4 @@ export interface JepsenOp {
 export interface JepsenOpsResponse {
   cluster_id: string;
   ops: JepsenOp[];
-}
-
-export interface LinearizeResponse {
-  cluster_id: string;
-  ops: number;
-  linearizable: boolean;
-  violation?: {
-    client_id: string;
-    kind: string;
-    key: string;
-    value: string;
-  };
-  note?: string;
 }
