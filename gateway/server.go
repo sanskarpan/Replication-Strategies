@@ -28,6 +28,7 @@ func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(slogMiddleware) // structured (slog) access logs
+	r.Use(otelMiddleware) // OTel distributed tracing — no-op when OTEL_ENABLED != "true"
 	r.Use(middleware.Recoverer)
 	// Cap request bodies at 1 MiB to prevent unbounded-memory (DoS) via large payloads.
 	r.Use(middleware.RequestSize(1 << 20))
