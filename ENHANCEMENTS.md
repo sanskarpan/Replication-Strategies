@@ -21,11 +21,16 @@ Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL**
 > **exportable JSON reports** (`GET /clusters/{id}/export`), and a **side-by-side strategy
 > race** (`POST /race`).
 >
-> **Genuinely-XL / deferred (would each be a dedicated multi-day change):** componentizing
-> the `main.ts` monolith behind a reactive framework, a full state-reconstructing timeline
-> scrubber, a Jepsen-style swimlane history viewer, OpenTelemetry distributed tracing, and
-> OpenAPI→TypeScript contract-type generation. These are noted as follow-ons; the core
-> value of each area is already delivered.
+> **XL EPICs (tracked as dedicated multi-task efforts):**
+> - ✅ **EPIC A — componentize the `main.ts` monolith** (shipped): the 1653-line file is now
+>   a 43-line bootstrap over a reactive core (`src/core/`: typed store as single source of
+>   truth, component contract, shared WS bus) + 16 panel components (`src/components/`). The
+>   global `topoSig`/`consistencySig` render hacks became component-local `renderGuard()`s.
+>   Adds opt-in live-reload (`DEV_HMR=1`), `bun test` unit tests for the core (in CI), and a
+>   sourcemapped build. Verified: tsc clean, 10 unit tests, 44/44 Playwright parity.
+> - ⏳ **EPIC B** — timeline scrubber + Jepsen swimlane viewer.
+> - ⏳ **EPIC C** — OpenTelemetry distributed tracing.
+> - ⏳ **EPIC D** — OpenAPI→TypeScript contract-type generation.
 >
 > **Out-of-repo (not code — cannot be produced/tested here):** a recorded demo video, a
 > hosted live deploy (Dockerfiles + compose make it `docker compose up`), a written
