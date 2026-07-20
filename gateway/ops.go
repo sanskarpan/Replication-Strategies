@@ -27,7 +27,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleReadyz is a readiness probe: the orchestrator is initialised and can serve.
+// handleReadyz is a readiness probe: the orchestrator is initialized and can serve.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if s.orch == nil {
 		writeError(w, http.StatusServiceUnavailable, "orchestrator not ready")
@@ -69,10 +69,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	for _, c := range clusters {
 		snap := c.Metrics.Snapshot()
 		cl := escapeLabel(c.ID)
-		strat := escapeLabel(snap.Strategy)
-		fmt.Fprintf(&b, "replsim_writes_total{cluster=%q,strategy=%q} %d\n", cl, strat, snap.TotalWrites)
-		fmt.Fprintf(&b, "replsim_reads_total{cluster=%q,strategy=%q} %d\n", cl, strat, snap.TotalReads)
-		fmt.Fprintf(&b, "replsim_conflicts_total{cluster=%q,strategy=%q} %d\n", cl, strat, snap.TotalConflicts)
+		strategy := escapeLabel(snap.Strategy)
+		fmt.Fprintf(&b, "replsim_writes_total{cluster=%q,strategy=%q} %d\n", cl, strategy, snap.TotalWrites)
+		fmt.Fprintf(&b, "replsim_reads_total{cluster=%q,strategy=%q} %d\n", cl, strategy, snap.TotalReads)
+		fmt.Fprintf(&b, "replsim_conflicts_total{cluster=%q,strategy=%q} %d\n", cl, strategy, snap.TotalConflicts)
 		fmt.Fprintf(&b, "replsim_dropped_messages{cluster=%q} %d\n", cl, c.GetState().DroppedMessages)
 		for id, nm := range snap.NodeMetrics {
 			node := escapeLabel(id)

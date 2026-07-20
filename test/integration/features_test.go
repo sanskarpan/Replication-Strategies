@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -25,10 +26,10 @@ func TestLinearizability_SingleLeaderIsLinearizable(t *testing.T) {
 	defer orch.DeleteCluster(c.ID)
 
 	for i, v := range []string{"1", "2", "3"} {
-		_, err := orch.Write(c.ID, c.LeaderID, "k", []byte(v), "client1")
-		require.NoError(t, err)
-		_, err = orch.Read(c.ID, c.LeaderID, "k", "client1")
-		require.NoError(t, err, "read %d", i)
+		_, err2 := orch.Write(context.Background(), c.ID, c.LeaderID, "k", []byte(v), "client1")
+		require.NoError(t, err2)
+		_, err2 = orch.Read(context.Background(), c.ID, c.LeaderID, "k", "client1")
+		require.NoError(t, err2, "read %d", i)
 	}
 
 	rep, err := orch.CheckLinearizable(c.ID)
@@ -60,13 +61,13 @@ func TestAntiEntropy_ReconcilesDivergentReplicas(t *testing.T) {
 	partID, err := orch.InjectPartition(c.ID, c.NodeIDs[:1], c.NodeIDs[1:])
 	require.NoError(t, err)
 	time.Sleep(20 * time.Millisecond)
-	_, err = orch.Write(c.ID, c.NodeIDs[0], "ae-key", []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), c.ID, c.NodeIDs[0], "ae-key", []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(20 * time.Millisecond)
 	// Heal the partition; anti-entropy runs before the 2s hinted-handoff ticker fires.
 	require.NoError(t, orch.HealPartition(c.ID, partID))
 
-	rep, err := orch.RunAntiEntropy(c.ID)
+	rep, err := orch.RunAntiEntropy(context.Background(), c.ID)
 	require.NoError(t, err)
 	assert.Contains(t, rep.DivergentKeys, "ae-key", "Merkle diff should flag the divergent key")
 	assert.Positive(t, rep.Reconciled, "stale replicas should be reconciled")
@@ -88,7 +89,7 @@ func TestSafeReconfigure_PreservesDataAndOverlap(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(c.ID)
 
-	_, err = orch.Write(c.ID, c.NodeIDs[0], "rk", []byte("v1"), "client1")
+	_, err = orch.Write(context.Background(), c.ID, c.NodeIDs[0], "rk", []byte("v1"), "client1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
@@ -100,7 +101,7 @@ func TestSafeReconfigure_PreservesDataAndOverlap(t *testing.T) {
 	assert.Greater(t, rep.NewQuorum[1]+rep.NewQuorum[2], rep.NewQuorum[0], "new W+R>N")
 
 	// The value survives the reconfiguration and remains readable.
-	res, err := orch.Read(c.ID, rep.AddedNode, "rk", "client1")
+	res, err := orch.Read(context.Background(), c.ID, rep.AddedNode, "rk", "client1")
 	require.NoError(t, err)
 	assert.Equal(t, "v1", string(entryValue(t, res.Entry)))
 }

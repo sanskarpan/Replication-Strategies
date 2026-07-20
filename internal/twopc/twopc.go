@@ -198,7 +198,7 @@ func (c *Coordinator) Execute(txID string, perParticipant map[Participant]map[st
 
 	if !allYes {
 		// Phase 2 (abort): every participant must roll back staging.
-		c.decide(txID, parts, false)
+		_ = c.decide(txID, parts, false)
 		return false, voteErr
 	}
 

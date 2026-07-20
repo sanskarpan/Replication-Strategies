@@ -66,7 +66,7 @@ func Load(path string) (*Config, error) {
 }
 
 // ApplyEnvOverrides layers environment variables over the loaded config so the server
-// is 12-factor friendly. Recognised: PORT, MAX_CLUSTERS, CORS_ORIGINS (comma-separated).
+// is 12-factor friendly. Recognized: PORT, MAX_CLUSTERS, CORS_ORIGINS (comma-separated).
 func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv("PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {

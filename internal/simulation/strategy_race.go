@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"fmt"
 
 	"replication-strategies/internal/metrics"
@@ -57,7 +58,7 @@ func (o *Orchestrator) RunStrategyRace(strategies []string, nodeCount, ops int) 
 		clientID := fmt.Sprintf("race-%s", s)
 		for i := 0; i < ops; i++ {
 			key := fmt.Sprintf("race-%d", i)
-			if _, werr := o.Write(cluster.ID, "", key, []byte(fmt.Sprintf("v-%d", i)), clientID); werr != nil {
+			if _, werr := o.Write(context.Background(), cluster.ID, "", key, []byte(fmt.Sprintf("v-%d", i)), clientID); werr != nil {
 				res.WriteErrors++
 			} else {
 				res.Writes++
@@ -65,7 +66,7 @@ func (o *Orchestrator) RunStrategyRace(strategies []string, nodeCount, ops int) 
 		}
 		for i := 0; i < ops; i++ {
 			key := fmt.Sprintf("race-%d", i)
-			o.Read(cluster.ID, "", key, clientID) //nolint:errcheck
+			o.Read(context.Background(), cluster.ID, "", key, clientID) //nolint:errcheck
 		}
 
 		res.AvgWriteLatencyMs = avgWriteLatency(cluster.Metrics.Snapshot())

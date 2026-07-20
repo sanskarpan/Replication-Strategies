@@ -37,7 +37,13 @@ Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL**
 >   bracket from the Wing-Gong linearizability checker); `store.setReplay()` lets all 16
 >   components transparently render historical state. Verified: `go test -race ./...` green,
 >   10/10 bun unit tests, 54/54 E2E (9 new EPIC-B assertions).
-> - ⏳ **EPIC C** — OpenTelemetry distributed tracing.
+> - ✅ **EPIC C** — OpenTelemetry distributed tracing: `internal/telemetry` package with a
+>   guarded provider (no-op unless `OTEL_ENABLED=true`). W3C `traceparent` extraction in a
+>   Chi middleware; `orchestrator.write`, `orchestrator.read`, and `orchestrator.anti_entropy`
+>   spans carry cluster/key/strategy/node attributes; trace context propagated across
+>   goroutine boundaries via `events.Event.TraceCarrier`. OTel Collector + Jaeger service
+>   added to `docker-compose.observability.yml`. 5 unit tests with in-memory exporter.
+>   `go test -race ./...` all green.
 > - ⏳ **EPIC D** — OpenAPI→TypeScript contract-type generation.
 >
 > **Out-of-repo (not code — cannot be produced/tested here):** a recorded demo video, a

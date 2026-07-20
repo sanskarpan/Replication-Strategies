@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"replication-strategies/internal/events"
 )
 
 var upgrader = websocket.Upgrader{
@@ -68,13 +67,4 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-}
-
-// wsEvent is a typed envelope sent over the WebSocket connection.
-// It mirrors events.Event but is kept here to decouple the wire format.
-type wsEvent struct {
-	Type      events.EventType       `json:"type"`
-	ClusterID string                 `json:"cluster_id"`
-	NodeID    string                 `json:"node_id,omitempty"`
-	Data      map[string]interface{} `json:"data,omitempty"`
 }

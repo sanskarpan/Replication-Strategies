@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"testing"
 
 	"replication-strategies/internal/events"
@@ -20,8 +21,8 @@ func TestExportReport_PopulatedAfterWrite(t *testing.T) {
 	}
 	defer o.DeleteCluster(c.ID)
 
-	if _, err := o.Write(c.ID, "", "k1", []byte("v1"), "client-1"); err != nil {
-		t.Fatalf("Write: %v", err)
+	if _, werr := o.Write(context.Background(), c.ID, "", "k1", []byte("v1"), "client-1"); werr != nil {
+		t.Fatalf("Write: %v", werr)
 	}
 
 	rep, err := o.ExportReport(c.ID)

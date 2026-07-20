@@ -1,12 +1,17 @@
 package simulation
 
 import (
+	"context"
 	"encoding/base64"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"replication-strategies/internal/antientropy"
 	"replication-strategies/internal/events"
 	"replication-strategies/internal/node"
 	"replication-strategies/internal/storage"
+	"replication-strategies/internal/telemetry"
 )
 
 // AntiEntropyReport summarizes a Merkle-tree anti-entropy pass.
@@ -62,9 +67,16 @@ func newestEntry(nodes map[string]node.Node, key string) *storage.KVEntry {
 // RunAntiEntropy performs a Merkle-tree anti-entropy round: it builds a Merkle tree per
 // online replica, uses the tree diff to find exactly the keys that differ (rather than
 // re-shipping the whole store), then reconciles each divergent key to its newest version.
-func (o *Orchestrator) RunAntiEntropy(clusterID string) (AntiEntropyReport, error) {
+func (o *Orchestrator) RunAntiEntropy(ctx context.Context, clusterID string) (AntiEntropyReport, error) {
+	ctx, span := telemetry.Tracer().Start(ctx, "orchestrator.anti_entropy")
+	span.SetAttributes(attribute.String("cluster_id", clusterID))
+	defer span.End()
+	_ = ctx
+
 	c, err := o.GetCluster(clusterID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return AntiEntropyReport{}, err
 	}
 
@@ -132,6 +144,12 @@ func (o *Orchestrator) RunAntiEntropy(clusterID string) (AntiEntropyReport, erro
 	}
 
 	rep.ConvergedAfter = c.CheckConvergence().Converged
+	span.SetAttributes(
+		attribute.Int("total_keys", rep.TotalKeys),
+		attribute.Int("divergent_keys", len(divergent)),
+		attribute.Int("reconciled", rep.Reconciled),
+		attribute.Bool("converged_after", rep.ConvergedAfter),
+	)
 	o.bus.Publish(events.Event{
 		Type:      events.EvtReadRepair,
 		ClusterID: clusterID,

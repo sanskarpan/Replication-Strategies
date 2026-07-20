@@ -40,7 +40,7 @@ func (o *Orchestrator) runHeartbeats(c *Cluster) {
 
 // drainClusterHistory subscribes to the global event bus and records every event that
 // belongs to this cluster into its durable ClusterEventHistory. It exits when the
-// cluster's context is cancelled (i.e. on DeleteCluster).
+// cluster's context is canceled (i.e. on DeleteCluster).
 func (o *Orchestrator) drainClusterHistory(c *Cluster) {
 	sub := o.bus.Subscribe("history:"+c.ID, []events.EventType{})
 	defer o.bus.Unsubscribe("history:" + c.ID)

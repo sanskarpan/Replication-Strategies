@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -27,7 +28,7 @@ func convergenceActual(r ConvergenceReport) string {
 
 // readValue reads a key through the orchestrator and returns the value string ("" on error).
 func readValue(o *Orchestrator, clusterID, nodeID, key string) string {
-	res, err := o.Read(clusterID, nodeID, key, "verdict-reader")
+	res, err := o.Read(context.Background(), clusterID, nodeID, key, "verdict-reader")
 	if err != nil || res == nil {
 		return ""
 	}
@@ -38,7 +39,7 @@ func readValue(o *Orchestrator, clusterID, nodeID, key string) string {
 }
 
 // corruptReplica overwrites one replica's stored value for key with a bad value carrying
-// an older timestamp, modelling a corrupt/stale on-disk copy that anti-entropy must heal.
+// an older timestamp, modeling a corrupt/stale on-disk copy that anti-entropy must heal.
 func corruptReplica(c *Cluster, nodeID, key string) {
 	n, ok := c.GetNode(nodeID)
 	if !ok {
@@ -66,7 +67,7 @@ type Scenario struct {
 	NodeCount   int                      `json:"node_count"`
 }
 
-// Scenarios is the catalogue of built-in demonstration scenarios.
+// Scenarios is the catalog of built-in demonstration scenarios.
 var Scenarios = []Scenario{
 	{
 		Name:        "ReplicationLag",
@@ -232,22 +233,22 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 		// Add 500 ms latency to the last follower.
 		if len(c.NodeIDs) >= 2 {
 			lastFollower := c.NodeIDs[len(c.NodeIDs)-1]
-			o.SetLatency(clusterID, c.LeaderID, lastFollower, 500)
+			_ = o.SetLatency(clusterID, c.LeaderID, lastFollower, 500)
 			for i := 0; i < 5; i++ {
-				o.Write(clusterID, c.LeaderID, fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("val%d", i)), "scenario-client") //nolint:errcheck
+				o.Write(context.Background(), clusterID, c.LeaderID, fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("val%d", i)), "scenario-client") //nolint:errcheck
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
 	case "SyncVsAsync":
 		for i := 0; i < 3; i++ {
-			o.Write(clusterID, c.LeaderID, fmt.Sprintf("async-key%d", i), []byte(fmt.Sprintf("async-val%d", i)), "client-async") //nolint:errcheck
+			o.Write(context.Background(), clusterID, c.LeaderID, fmt.Sprintf("async-key%d", i), []byte(fmt.Sprintf("async-val%d", i)), "client-async") //nolint:errcheck
 			time.Sleep(50 * time.Millisecond)
 		}
 
 	case "MultiLeaderConflict":
 		if len(c.NodeIDs) >= 3 {
-			o.Write(clusterID, c.NodeIDs[0], "conflict-key", []byte("initial"), "client-0") //nolint:errcheck
+			o.Write(context.Background(), clusterID, c.NodeIDs[0], "conflict-key", []byte("initial"), "client-0") //nolint:errcheck
 			time.Sleep(100 * time.Millisecond)
 
 			// Isolate every node from every other.
@@ -260,7 +261,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 
 			// Concurrent writes to the same key.
 			for i, nodeID := range c.NodeIDs {
-				o.Write(clusterID, nodeID, "conflict-key", []byte(fmt.Sprintf("value-from-%s", nodeID)), fmt.Sprintf("client-%d", i)) //nolint:errcheck
+				o.Write(context.Background(), clusterID, nodeID, "conflict-key", []byte(fmt.Sprintf("value-from-%s", nodeID)), fmt.Sprintf("client-%d", i)) //nolint:errcheck
 				time.Sleep(20 * time.Millisecond)
 			}
 
@@ -278,8 +279,8 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			o.InjectPartition(clusterID, groupA, groupB) //nolint:errcheck
 			time.Sleep(50 * time.Millisecond)
 
-			o.Write(clusterID, groupA[0], "split-key", []byte("from-group-a"), "client-a") //nolint:errcheck
-			o.Write(clusterID, groupB[0], "split-key", []byte("from-group-b"), "client-b") //nolint:errcheck
+			o.Write(context.Background(), clusterID, groupA[0], "split-key", []byte("from-group-a"), "client-a") //nolint:errcheck
+			o.Write(context.Background(), clusterID, groupB[0], "split-key", []byte("from-group-b"), "client-b") //nolint:errcheck
 
 			time.Sleep(1 * time.Second)
 			for partID := range c.Fabric.GetPartitions() {
@@ -289,13 +290,13 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 
 	case "QuorumTuning":
 		for i := 0; i < 5; i++ {
-			o.Write(clusterID, c.NodeIDs[0], fmt.Sprintf("quorum-key-%d", i), []byte(fmt.Sprintf("value-%d", i)), "scenario-client") //nolint:errcheck
+			o.Write(context.Background(), clusterID, c.NodeIDs[0], fmt.Sprintf("quorum-key-%d", i), []byte(fmt.Sprintf("value-%d", i)), "scenario-client") //nolint:errcheck
 			time.Sleep(50 * time.Millisecond)
 		}
 
 	case "ReadRepair":
 		if len(c.NodeIDs) >= 3 {
-			o.Write(clusterID, c.NodeIDs[0], "repair-key", []byte("repair-value"), "scenario-client") //nolint:errcheck
+			o.Write(context.Background(), clusterID, c.NodeIDs[0], "repair-key", []byte("repair-value"), "scenario-client") //nolint:errcheck
 			time.Sleep(100 * time.Millisecond)
 
 			o.PauseNode(clusterID, c.NodeIDs[1]) //nolint:errcheck
@@ -303,7 +304,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			time.Sleep(50 * time.Millisecond)
 
 			// Write a new value while two nodes are paused.
-			o.Write(clusterID, c.NodeIDs[0], "repair-key", []byte("updated-repair-value"), "scenario-client") //nolint:errcheck
+			o.Write(context.Background(), clusterID, c.NodeIDs[0], "repair-key", []byte("updated-repair-value"), "scenario-client") //nolint:errcheck
 			time.Sleep(50 * time.Millisecond)
 
 			// Resume the stale nodes.
@@ -311,7 +312,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			o.ResumeNode(clusterID, c.NodeIDs[2]) //nolint:errcheck
 
 			// A read now triggers repair.
-			o.Read(clusterID, c.NodeIDs[0], "repair-key", "scenario-client") //nolint:errcheck
+			o.Read(context.Background(), clusterID, c.NodeIDs[0], "repair-key", "scenario-client") //nolint:errcheck
 		}
 
 	case "NetworkPartitionHeal":
@@ -320,7 +321,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			time.Sleep(50 * time.Millisecond)
 
 			for i, nodeID := range c.NodeIDs {
-				o.Write(clusterID, nodeID, fmt.Sprintf("partition-key-%d", i), []byte(fmt.Sprintf("partition-val-%d", i)), fmt.Sprintf("client-%d", i)) //nolint:errcheck
+				o.Write(context.Background(), clusterID, nodeID, fmt.Sprintf("partition-key-%d", i), []byte(fmt.Sprintf("partition-val-%d", i)), fmt.Sprintf("client-%d", i)) //nolint:errcheck
 				time.Sleep(20 * time.Millisecond)
 			}
 
@@ -329,7 +330,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 				o.HealPartition(clusterID, partID) //nolint:errcheck
 			}
 			o.narrate(clusterID, "partition healed; anti-entropy reconciles the divergent keys")
-			o.RunAntiEntropy(clusterID) //nolint:errcheck
+			o.RunAntiEntropy(context.Background(), clusterID) //nolint:errcheck
 			conv := c.CheckConvergence()
 			o.verdict(clusterID, "all replicas converge after the heal",
 				convergenceActual(conv), conv.Converged)
@@ -338,7 +339,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 	case "CascadingFailure":
 		o.narrate(clusterID, "steady state: writing under a healthy 5-node quorum (W=2)")
 		for i := 0; i < 4; i++ {
-			o.Write(clusterID, c.NodeIDs[0], fmt.Sprintf("cf-%d", i), []byte("v"), "load") //nolint:errcheck
+			o.Write(context.Background(), clusterID, c.NodeIDs[0], fmt.Sprintf("cf-%d", i), []byte("v"), "load") //nolint:errcheck
 		}
 		o.narrate(clusterID, "node-1 overloads and fails; its share of the load shifts to peers", c.NodeIDs[1])
 		o.PauseNode(clusterID, c.NodeIDs[1]) //nolint:errcheck
@@ -347,7 +348,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 		o.PauseNode(clusterID, c.NodeIDs[2]) //nolint:errcheck
 		time.Sleep(120 * time.Millisecond)
 		// With 2 of 5 down and W=2, writes can still just meet quorum via sloppy stand-ins.
-		_, werr := o.Write(clusterID, c.NodeIDs[0], "cf-after", []byte("v"), "load")
+		_, werr := o.Write(context.Background(), clusterID, c.NodeIDs[0], "cf-after", []byte("v"), "load")
 		o.verdict(clusterID, "cascading node loss degrades but sloppy quorum keeps writes alive",
 			boolText(werr == nil, "write still succeeded via remaining/stand-in nodes", "write failed — quorum lost"),
 			werr == nil)
@@ -360,7 +361,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			wg.Add(1)
 			go func(n int) {
 				defer wg.Done()
-				o.Write(clusterID, c.NodeIDs[n%len(c.NodeIDs)], "herd-key", []byte("v"), fmt.Sprintf("c%d", n)) //nolint:errcheck
+				o.Write(context.Background(), clusterID, c.NodeIDs[n%len(c.NodeIDs)], "herd-key", []byte("v"), fmt.Sprintf("c%d", n)) //nolint:errcheck
 			}(i)
 		}
 		wg.Wait()
@@ -381,7 +382,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			} else {
 				hot++
 			}
-			o.Write(clusterID, c.NodeIDs[i%len(c.NodeIDs)], key, []byte("v"), "zipf") //nolint:errcheck
+			o.Write(context.Background(), clusterID, c.NodeIDs[i%len(c.NodeIDs)], key, []byte("v"), "zipf") //nolint:errcheck
 		}
 		o.narrate(clusterID, fmt.Sprintf("hot-key writes: %d, cold-key writes: %d", hot, cold))
 		o.verdict(clusterID, "one hot key dominates the workload",
@@ -399,7 +400,7 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 				time.Sleep(60 * time.Millisecond)
 			}
 			o.narrate(clusterID, "link restored; writes flow again")
-			_, werr := o.Write(clusterID, a, "flap-key", []byte("v"), "flap")
+			_, werr := o.Write(context.Background(), clusterID, a, "flap-key", []byte("v"), "flap")
 			o.verdict(clusterID, "the cluster tolerates a flapping link and recovers",
 				boolText(werr == nil, "post-flap write succeeded", "post-flap write failed"), werr == nil)
 		}
@@ -411,11 +412,11 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 			o.SetClockSkew(clusterID, skewed, -5000) //nolint:errcheck
 			time.Sleep(30 * time.Millisecond)
 			o.narrate(clusterID, "the skewed node makes a write, then a causally-later write lands on a normal node")
-			o.Write(clusterID, skewed, "skew-key", []byte("first-from-skewed"), "c1") //nolint:errcheck
+			o.Write(context.Background(), clusterID, skewed, "skew-key", []byte("first-from-skewed"), "c1") //nolint:errcheck
 			time.Sleep(50 * time.Millisecond)
-			o.Write(clusterID, normal, "skew-key", []byte("second-causally-later"), "c1") //nolint:errcheck
+			o.Write(context.Background(), clusterID, normal, "skew-key", []byte("second-causally-later"), "c1") //nolint:errcheck
 			time.Sleep(150 * time.Millisecond)
-			o.RunAntiEntropy(clusterID) //nolint:errcheck
+			o.RunAntiEntropy(context.Background(), clusterID) //nolint:errcheck
 			// HLC should carry the causal order so the later write wins despite the skew.
 			won := readValue(o, clusterID, normal, "skew-key") == "second-causally-later"
 			o.verdict(clusterID, "HLC preserves causal order: the later write wins despite the backward skew",
@@ -424,13 +425,13 @@ func (o *Orchestrator) setupScenario(clusterID, scenarioName string) {
 
 	case "CorruptReplica":
 		o.narrate(clusterID, "writing a good value to the cluster")
-		o.Write(clusterID, c.NodeIDs[0], "corrupt-key", []byte("correct-value"), "c1") //nolint:errcheck
+		o.Write(context.Background(), clusterID, c.NodeIDs[0], "corrupt-key", []byte("correct-value"), "c1") //nolint:errcheck
 		time.Sleep(120 * time.Millisecond)
 		o.narrate(clusterID, "one replica's on-disk value is corrupted (stale/bad copy)", c.NodeIDs[3])
 		corruptReplica(c, c.NodeIDs[3], "corrupt-key")
 		time.Sleep(30 * time.Millisecond)
 		o.narrate(clusterID, "anti-entropy compares Merkle trees and repairs the corrupt replica")
-		o.RunAntiEntropy(clusterID) //nolint:errcheck
+		o.RunAntiEntropy(context.Background(), clusterID) //nolint:errcheck
 		conv := c.CheckConvergence()
 		o.verdict(clusterID, "anti-entropy heals the corrupt replica; all replicas agree",
 			convergenceActual(conv), conv.Converged)

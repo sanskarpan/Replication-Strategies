@@ -33,6 +33,9 @@ type Event struct {
 	NodeID    string                 `json:"node_id,omitempty"`
 	Timestamp time.Time              `json:"timestamp"`
 	Data      map[string]interface{} `json:"data,omitempty"`
+	// TraceCarrier holds W3C traceparent/tracestate headers so spans can be
+	// linked across goroutine boundaries (bus publish → subscriber).
+	TraceCarrier map[string]string `json:"-"`
 }
 
 type Subscriber struct {

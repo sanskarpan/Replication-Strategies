@@ -4,6 +4,7 @@ package integration
 // Each test is named ISSUE_<n>_<summary> and fails on the pre-fix code.
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func TestISSUE1_AntiEntropy_NoSpuriousConflicts(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
 	require.NoError(t, err)
 
 	// Several anti-entropy ticks (500ms each) with no further writes.
@@ -56,13 +57,13 @@ func TestISSUE2_Leaderless_ReadLocalMiss_NoTimeout(t *testing.T) {
 
 	// Pause the coordinator so it misses the write entirely (guaranteed local miss).
 	require.NoError(t, orch.PauseNode(cluster.ID, cluster.NodeIDs[0]))
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[1], "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[1], "k", []byte("v"), "c1")
 	require.NoError(t, err)
 	time.Sleep(200 * time.Millisecond)
 	require.NoError(t, orch.ResumeNode(cluster.ID, cluster.NodeIDs[0]))
 
 	start := time.Now()
-	res, err := orch.Read(cluster.ID, cluster.NodeIDs[0], "k", "c1")
+	res, err := orch.Read(context.Background(), cluster.ID, cluster.NodeIDs[0], "k", "c1")
 	elapsed := time.Since(start)
 
 	require.NoError(t, err, "read should succeed via remote quorum")
@@ -89,7 +90,7 @@ func TestISSUE3_Leaderless_WriteQuorumFailure_Errors(t *testing.T) {
 	require.NoError(t, orch.PauseNode(cluster.ID, cluster.NodeIDs[1]))
 	require.NoError(t, orch.PauseNode(cluster.ID, cluster.NodeIDs[2]))
 
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
 	assert.Error(t, err, "write must fail when W acks are unreachable")
 }
 
@@ -106,7 +107,7 @@ func TestISSUE3_Leaderless_WriteQuorumMet_Succeeds(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
 	assert.NoError(t, err, "write meeting W must succeed")
 }
 
@@ -129,7 +130,7 @@ func TestISSUE3_SingleLeader_SyncReplicationIncomplete_Errors(t *testing.T) {
 		}
 	}
 
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "k", []byte("v"), "c1")
 	assert.Error(t, err, "sync write must fail when followers cannot ack")
 }
 
@@ -165,7 +166,7 @@ func TestISSUE4_Leaderless_HintedHandoff_DeliversOnRecovery(t *testing.T) {
 	downNode := cluster.NodeIDs[2]
 	require.NoError(t, orch.PauseNode(cluster.ID, downNode))
 
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "hint-key", []byte("hint-val"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "hint-key", []byte("hint-val"), "c1")
 	require.NoError(t, err, "W=1 write should succeed even with one node down")
 
 	// Let the grace window elapse so the hint is buffered, then recover the node.
@@ -203,16 +204,16 @@ func TestISSUE5_SingleLeader_DeletePropagates(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "del-key", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "del-key", []byte("v"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
-	require.NoError(t, orch.Delete(cluster.ID, cluster.LeaderID, "del-key", "c1"))
+	require.NoError(t, orch.Delete(context.Background(), cluster.ID, cluster.LeaderID, "del-key", "c1"))
 	time.Sleep(150 * time.Millisecond)
 
 	// Not found on leader and every follower.
 	for _, id := range cluster.NodeIDs {
-		_, err := orch.Read(cluster.ID, id, "del-key", "c1")
+		_, err := orch.Read(context.Background(), cluster.ID, id, "del-key", "c1")
 		assert.Error(t, err, "node %s should report the deleted key as not found", id)
 	}
 }
@@ -230,14 +231,14 @@ func TestISSUE5_Leaderless_DeletePropagates(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "del-key", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "del-key", []byte("v"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
-	require.NoError(t, orch.Delete(cluster.ID, cluster.NodeIDs[0], "del-key", "c1"))
+	require.NoError(t, orch.Delete(context.Background(), cluster.ID, cluster.NodeIDs[0], "del-key", "c1"))
 	time.Sleep(150 * time.Millisecond)
 
-	_, err = orch.Read(cluster.ID, cluster.NodeIDs[0], "del-key", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, cluster.NodeIDs[0], "del-key", "c1")
 	assert.Error(t, err, "deleted key should read as not found after quorum delete")
 }
 
@@ -263,23 +264,23 @@ func TestISSUE12_Follower_RecoversDroppedEntries(t *testing.T) {
 
 	// Drop everything leader -> follower, then write two entries it will miss.
 	require.NoError(t, orch.SetDropRate(cluster.ID, cluster.LeaderID, follower, 1.0))
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "k1", []byte("v1"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "k1", []byte("v1"), "c1")
 	require.NoError(t, err)
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "k2", []byte("v2"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "k2", []byte("v2"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
 	// Confirm the follower is missing the data.
-	_, missErr := orch.Read(cluster.ID, follower, "k1", "c1")
+	_, missErr := orch.Read(context.Background(), cluster.ID, follower, "k1", "c1")
 	require.Error(t, missErr, "precondition: follower should be missing k1 while link is down")
 
 	// Heal the link; the periodic sync loop (1s) should fill the gap.
 	require.NoError(t, orch.ClearNetworkFaults(cluster.ID))
 	time.Sleep(2500 * time.Millisecond)
 
-	_, err = orch.Read(cluster.ID, follower, "k1", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, follower, "k1", "c1")
 	assert.NoError(t, err, "follower should recover k1 via catch-up sync")
-	_, err = orch.Read(cluster.ID, follower, "k2", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, follower, "k2", "c1")
 	assert.NoError(t, err, "follower should recover k2 via catch-up sync")
 }
 
@@ -329,7 +330,7 @@ func TestISSUE14_AddNode_QuorumStaysConsistent(t *testing.T) {
 	require.NoError(t, err)
 
 	// A write with the new membership should still reach quorum and succeed.
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
 	assert.NoError(t, err, "write should succeed with consistent quorum after AddNode")
 }
 
@@ -375,7 +376,7 @@ func TestISSUE7_ConfigPatch_ChangesLiveMode(t *testing.T) {
 			require.NoError(t, orch.PauseNode(cluster.ID, id))
 		}
 	}
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "k", []byte("v"), "c1")
 	assert.Error(t, err, "after switching to sync, a write with paused followers must fail")
 }
 
@@ -396,19 +397,19 @@ func TestISSUE9_Leaderless_ReadRepairsCoordinatorLocal(t *testing.T) {
 	coord := cluster.NodeIDs[0]
 
 	// v1 everywhere.
-	_, err = orch.Write(cluster.ID, coord, "k", []byte("v1"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, coord, "k", []byte("v1"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
 	// Pause coordinator, write v2 (coordinator misses it), resume -> coordinator stale.
 	require.NoError(t, orch.PauseNode(cluster.ID, coord))
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[1], "k", []byte("v2"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[1], "k", []byte("v2"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 	require.NoError(t, orch.ResumeNode(cluster.ID, coord))
 
 	// Quorum read from the coordinator sees v2 and must repair its own local copy.
-	res, err := orch.Read(cluster.ID, coord, "k", "c1")
+	res, err := orch.Read(context.Background(), cluster.ID, coord, "k", "c1")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("v2"), res.Entry.(*storage.KVEntry).Value)
 
@@ -438,13 +439,13 @@ func TestISSUE10_MultiLeader_ConcurrentWritesConverge(t *testing.T) {
 	done := make(chan struct{}, 2)
 	go func() {
 		for i := 0; i < 20; i++ {
-			_, _ = orch.Write(cluster.ID, n0, "k", []byte("from-0"), "c0")
+			_, _ = orch.Write(context.Background(), cluster.ID, n0, "k", []byte("from-0"), "c0")
 		}
 		done <- struct{}{}
 	}()
 	go func() {
 		for i := 0; i < 20; i++ {
-			_, _ = orch.Write(cluster.ID, n1, "k", []byte("from-1"), "c1")
+			_, _ = orch.Write(context.Background(), cluster.ID, n1, "k", []byte("from-1"), "c1")
 		}
 		done <- struct{}{}
 	}()
@@ -453,8 +454,8 @@ func TestISSUE10_MultiLeader_ConcurrentWritesConverge(t *testing.T) {
 
 	// Let anti-entropy converge, then both nodes must agree on the same value.
 	time.Sleep(1500 * time.Millisecond)
-	r0, err0 := orch.Read(cluster.ID, n0, "k", "c")
-	r1, err1 := orch.Read(cluster.ID, n1, "k", "c")
+	r0, err0 := orch.Read(context.Background(), cluster.ID, n0, "k", "c")
+	r1, err1 := orch.Read(context.Background(), cluster.ID, n1, "k", "c")
 	require.NoError(t, err0)
 	require.NoError(t, err1)
 	assert.Equal(t, r0.Entry.(*storage.KVEntry).Value, r1.Entry.(*storage.KVEntry).Value,
@@ -478,19 +479,19 @@ func TestISSUE30_Leaderless_TombstoneNoResurrection(t *testing.T) {
 	n0, n2 := cluster.NodeIDs[0], cluster.NodeIDs[2]
 
 	// Write reaches all nodes.
-	_, err = orch.Write(cluster.ID, n0, "k", []byte("live"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, n0, "k", []byte("live"), "c1")
 	require.NoError(t, err)
 	time.Sleep(150 * time.Millisecond)
 
 	// Pause n2, then delete — n2 misses the tombstone but n0/n1 get it.
 	require.NoError(t, orch.PauseNode(cluster.ID, n2))
-	require.NoError(t, orch.Delete(cluster.ID, n0, "k", "c1"))
+	require.NoError(t, orch.Delete(context.Background(), cluster.ID, n0, "k", "c1"))
 	time.Sleep(100 * time.Millisecond)
 	require.NoError(t, orch.ResumeNode(cluster.ID, n2))
 
 	// Quorum read from n0: n0/n1 have the tombstone (newer), n2 has the stale live value.
 	// The delete must win — read returns not-found, no resurrection.
-	_, err = orch.Read(cluster.ID, n0, "k", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, n0, "k", "c1")
 	assert.Error(t, err, "read after delete must return not-found, not the resurrected live value")
 
 	// n2's stale live value must be repaired to the tombstone (convergence).
@@ -514,7 +515,7 @@ func TestISSUE31_SingleLeader_SyncDeleteIncomplete_Errors(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.LeaderID, "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.LeaderID, "k", []byte("v"), "c1")
 	// write itself may error (sync) but the key is committed locally; ignore.
 	_ = err
 	for _, id := range cluster.NodeIDs {
@@ -522,7 +523,7 @@ func TestISSUE31_SingleLeader_SyncDeleteIncomplete_Errors(t *testing.T) {
 			require.NoError(t, orch.PauseNode(cluster.ID, id))
 		}
 	}
-	err = orch.Delete(cluster.ID, cluster.LeaderID, "k", "c1")
+	err = orch.Delete(context.Background(), cluster.ID, cluster.LeaderID, "k", "c1")
 	assert.Error(t, err, "sync delete with paused followers must fail (honors replication mode)")
 }
 
@@ -541,7 +542,7 @@ func TestISSUE32_Leaderless_ReadQuorumNotMet(t *testing.T) {
 	defer orch.DeleteCluster(cluster.ID)
 
 	n0, n1, n2 := cluster.NodeIDs[0], cluster.NodeIDs[1], cluster.NodeIDs[2]
-	_, err = orch.Write(cluster.ID, n0, "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, n0, "k", []byte("v"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
@@ -549,7 +550,7 @@ func TestISSUE32_Leaderless_ReadQuorumNotMet(t *testing.T) {
 	require.NoError(t, orch.PauseNode(cluster.ID, n1))
 	require.NoError(t, orch.PauseNode(cluster.ID, n2))
 
-	_, err = orch.Read(cluster.ID, n0, "k", "c1")
+	_, err = orch.Read(context.Background(), cluster.ID, n0, "k", "c1")
 	require.Error(t, err, "read must fail when R responses are unreachable")
 	assert.Contains(t, err.Error(), "quorum not met")
 }
@@ -564,7 +565,7 @@ func TestConvergence_Checker(t *testing.T) {
 	require.NoError(t, err)
 	defer orch.DeleteCluster(cluster.ID)
 
-	_, err = orch.Write(cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, cluster.NodeIDs[0], "k", []byte("v"), "c1")
 	require.NoError(t, err)
 	time.Sleep(1500 * time.Millisecond) // anti-entropy converges
 
@@ -591,17 +592,17 @@ func TestHLC_CausalOrderSurvivesClockSkew(t *testing.T) {
 	require.NoError(t, orch.SetClockSkew(cluster.ID, skewed, -10000))
 
 	// v1 written by the coordinator (normal clock), replicated to all incl. the skewed node.
-	_, err = orch.Write(cluster.ID, coord, "k", []byte("v1"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, coord, "k", []byte("v1"), "c1")
 	require.NoError(t, err)
 	time.Sleep(200 * time.Millisecond)
 
 	// v2 written by the skewed node — causally AFTER v1 (it received v1). Its HLC was
 	// advanced by v1, so v2's timestamp dominates despite the 10s-behind wall clock.
-	_, err = orch.Write(cluster.ID, skewed, "k", []byte("v2"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, skewed, "k", []byte("v2"), "c1")
 	require.NoError(t, err)
 	time.Sleep(300 * time.Millisecond)
 
-	res, err := orch.Read(cluster.ID, coord, "k", "c1")
+	res, err := orch.Read(context.Background(), cluster.ID, coord, "k", "c1")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("v2"), res.Entry.(*storage.KVEntry).Value,
 		"causally-later write must win despite the writer's skewed-behind clock (HLC)")
@@ -676,7 +677,7 @@ func TestRegions_InterRegionLatency(t *testing.T) {
 			r1 = id
 		}
 	}
-	_, err = orch.Write(cluster.ID, r0, "k", []byte("v"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, r0, "k", []byte("v"), "c1")
 	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond) // well under the 400ms cross-region latency
 	nn, _ := cluster.GetNode(r1)
@@ -738,9 +739,9 @@ func TestManualConflict_ParkAndResolve(t *testing.T) {
 	pid, err := orch.InjectPartition(cluster.ID, []string{n0}, []string{n1})
 	require.NoError(t, err)
 	time.Sleep(50 * time.Millisecond)
-	_, err = orch.Write(cluster.ID, n0, "k", []byte("from-0"), "c0")
+	_, err = orch.Write(context.Background(), cluster.ID, n0, "k", []byte("from-0"), "c0")
 	require.NoError(t, err)
-	_, err = orch.Write(cluster.ID, n1, "k", []byte("from-1"), "c1")
+	_, err = orch.Write(context.Background(), cluster.ID, n1, "k", []byte("from-1"), "c1")
 	require.NoError(t, err)
 	require.NoError(t, orch.HealPartition(cluster.ID, pid))
 	time.Sleep(1200 * time.Millisecond) // anti-entropy detects + parks the conflict

@@ -21,7 +21,7 @@ type MultiLeaderNode struct {
 	resolver conflict.ConflictResolver
 	inbox_ch chan transport.Message
 
-	// applyMu serialises the per-key read-modify-write of the store across both the
+	// applyMu serializes the per-key read-modify-write of the store across both the
 	// local Write path and the remote-apply path, so a local write and an incoming
 	// replicated write cannot interleave and lose an update.
 	applyMu sync.Mutex
