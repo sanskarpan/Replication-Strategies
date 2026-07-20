@@ -28,7 +28,15 @@ Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL**
 >   global `topoSig`/`consistencySig` render hacks became component-local `renderGuard()`s.
 >   Adds opt-in live-reload (`DEV_HMR=1`), `bun test` unit tests for the core (in CI), and a
 >   sourcemapped build. Verified: tsc clean, 10 unit tests, 44/44 Playwright parity.
-> - ⏳ **EPIC B** — timeline scrubber + Jepsen swimlane viewer.
+> - ✅ **EPIC B — timeline scrubber + Jepsen swimlane viewer** (shipped): bounded per-cluster
+>   event ring buffer (1000 entries) with periodic `ClusterState` snapshots every 50 events
+>   and on every structural change (partition/node-state/leader-elected). Backend: four new
+>   endpoints (`GET /clusters/{id}/history`, `/history/state?at=N`, `/ops`, `/linearize`).
+>   Frontend: sticky timeline scrubber strip (play/pause/step/seek/live) backed by a canvas
+>   tick display; D3 Jepsen swimlane panel (one row per client, write/read bars, red anomaly
+>   bracket from the Wing-Gong linearizability checker); `store.setReplay()` lets all 16
+>   components transparently render historical state. Verified: `go test -race ./...` green,
+>   10/10 bun unit tests, 54/54 E2E (9 new EPIC-B assertions).
 > - ⏳ **EPIC C** — OpenTelemetry distributed tracing.
 > - ⏳ **EPIC D** — OpenAPI→TypeScript contract-type generation.
 >
