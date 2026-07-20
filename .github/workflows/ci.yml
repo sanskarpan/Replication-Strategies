@@ -110,6 +110,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: OpenAPI contract-drift check
+        run: bun run check:types-drift
+
       - name: Type check
         run: bunx tsc --noEmit
 
