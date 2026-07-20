@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"replication-strategies/internal/events"
 	"replication-strategies/internal/hashring"
 	"replication-strategies/internal/node"
 )
@@ -33,6 +34,25 @@ func (o *Orchestrator) runHeartbeats(c *Cluster) {
 					c.detector.Heartbeat(id, now)
 				}
 			}
+		}
+	}
+}
+
+// drainClusterHistory subscribes to the global event bus and records every event that
+// belongs to this cluster into its durable ClusterEventHistory. It exits when the
+// cluster's context is cancelled (i.e. on DeleteCluster).
+func (o *Orchestrator) drainClusterHistory(c *Cluster) {
+	sub := o.bus.Subscribe("history:"+c.ID, []events.EventType{})
+	defer o.bus.Unsubscribe("history:" + c.ID)
+	for {
+		select {
+		case evt := <-sub.Ch:
+			if evt.ClusterID != c.ID {
+				continue
+			}
+			c.eventHistory.Append(evt, c.GetState)
+		case <-c.ctx.Done():
+			return
 		}
 	}
 }
