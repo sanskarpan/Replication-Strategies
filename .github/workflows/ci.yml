@@ -66,11 +66,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install golangci-lint (compiled with current Go toolchain)
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --go=1.24 --timeout=5m
+        run: golangci-lint run --timeout=5m
 
   govulncheck:
     name: govulncheck
