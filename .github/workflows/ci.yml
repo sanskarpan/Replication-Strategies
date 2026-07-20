@@ -112,6 +112,9 @@ jobs:
       - name: Type check
         run: bunx tsc --noEmit
 
+      - name: Unit tests
+        run: bun test
+
   e2e:
     name: Playwright browser E2E
     runs-on: ubuntu-latest
