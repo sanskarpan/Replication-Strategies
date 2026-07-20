@@ -22,10 +22,10 @@ export async function openInspector(clusterId: string, nodeId: string) {
       api.getNodeLog(clusterId, nodeId),
     ]);
     const storeRows = Object.values(storeSnap || {})
-      .sort((a, b) => a.key.localeCompare(b.key))
+      .sort((a, b) => (a.key ?? "").localeCompare(b.key ?? ""))
       .map((e) => `
         <tr class="${e.tombstone ? "tombstone" : ""}">
-          <td>${esc(e.key)}</td>
+          <td>${esc(e.key ?? "")}</td>
           <td>${e.tombstone ? "<i>deleted</i>" : esc(decodeB64(String(e.value)))}</td>
           <td>${e.version ?? "—"}</td>
           <td>${vcChipsHTML(e.vclock)}</td>
