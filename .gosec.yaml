@@ -1,0 +1,19 @@
+global:
+  # Rules excluded because they are intentional in a simulation / teaching tool,
+  # not a production service:
+  #
+  # G104 — unhandled errors in fire-and-forget scenario goroutines
+  # G108 — pprof is guarded behind PPROF_ADDR env var (cmd/server/main.go)
+  # G112 — ReadHeaderTimeout omitted; simulator is not internet-facing
+  # G114 — net/http serve without timeout; acceptable for local simulator
+  # G115 — uint→int narrowing is intentional (log indices, counters)
+  # G304 — config file path comes from a trusted CLI flag, not user input
+  # G404 — math/rand is intentional for deterministic simulation; no secrets involved
+  exclude:
+    - G104
+    - G108
+    - G112
+    - G114
+    - G115
+    - G304
+    - G404
