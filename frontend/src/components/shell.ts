@@ -43,8 +43,8 @@ function currentConfigSnapshot(): { config: Record<string, unknown>; faults: Rec
   const faults = cluster
     ? {
         partitions: Object.values(cluster.partitions || {}).map((p) => ({
-          group_a: Object.keys(p.group_a),
-          group_b: Object.keys(p.group_b),
+          group_a: Object.keys(p.group_a ?? {}),
+          group_b: Object.keys(p.group_b ?? {}),
         })),
         dropped_messages: cluster.dropped_messages ?? 0,
       }
