@@ -14,6 +14,8 @@ class AppStore {
   events: SimEvent[] = [];
   maxEvents = 500;
   private listeners: Set<Listener> = new Set();
+  private replayState: ClusterState | null = null;
+  private replaySeq: number = 0;
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
@@ -25,12 +27,34 @@ class AppStore {
   }
 
   // state projects the store into the immutable snapshot components render from.
+  // When a replay state is set (scrubber active), all components see the historical
+  // cluster state transparently — no component needs to know the difference.
   state(): AppState {
     return {
-      active: this.getActive(),
+      active: this.replayState ?? this.getActive(),
       activeId: this.activeClusterId,
       clusterCount: this.clusters.size,
+      replay: this.replayState !== null,
+      replaySeq: this.replaySeq,
     };
+  }
+
+  // setReplay pins the rendered state to a historical ClusterState. Polling is
+  // not paused — the scrubber component owns that lifecycle.
+  setReplay(state: ClusterState, seq: number): void {
+    this.replayState = state;
+    this.replaySeq = seq;
+    this.notify();
+  }
+
+  clearReplay(): void {
+    this.replayState = null;
+    this.replaySeq = 0;
+    this.notify();
+  }
+
+  isReplaying(): boolean {
+    return this.replayState !== null;
   }
 
   handleEvent(evt: SimEvent): void {
