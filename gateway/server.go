@@ -114,6 +114,12 @@ func (s *Server) Router() http.Handler {
 		r.Get("/scenarios", s.handleListScenarios)
 		r.Post("/scenarios/{name}/run", s.handleRunScenario)
 
+		// EPIC B: durable event history + Jepsen op history
+		r.Get("/clusters/{id}/history", s.handleClusterHistory)
+		r.Get("/clusters/{id}/history/state", s.handleClusterHistoryState)
+		r.Get("/clusters/{id}/ops", s.handleClusterOps)
+		r.Get("/clusters/{id}/linearize", s.handleClusterLinearize)
+
 		// Standalone primitive demos (2PC, MVCC, WAL, SWIM, Paxos, deterministic sim)
 		r.Get("/demos/2pc", s.handleDemoTwoPC)
 		r.Get("/demos/mvcc", s.handleDemoMVCC)
