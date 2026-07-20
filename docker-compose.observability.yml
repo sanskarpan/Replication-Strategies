@@ -1,16 +1,24 @@
-# Observability stack: Prometheus + Grafana, wired to the backend's /metrics endpoint.
+# Observability stack: Prometheus + Grafana + OTel Collector + Jaeger.
 #
-# This joins the same `repl-net` network the app's docker-compose.yml creates, so
-# Prometheus can reach the `backend` service by name. Bring the app up first:
+# Wired to the same `repl-net` network as docker-compose.yml so each service is
+# reachable by name. Bring the app up first, then this stack:
 #
-#   docker compose up -d                              # creates network + backend
+#   docker compose up -d
 #   docker compose -f docker-compose.observability.yml up -d
 #
-# Grafana:    http://localhost:3000  (admin / admin)
-# Prometheus: http://localhost:9090
-#
-# If you prefer a single command, merge both files:
+# Or merge both in one command:
 #   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+#
+# Endpoints:
+#   Grafana:       http://localhost:3000  (admin / admin)
+#   Prometheus:    http://localhost:9090
+#   Jaeger UI:     http://localhost:16686
+#   OTLP HTTP:     http://localhost:4318  (app → collector)
+#   OTLP gRPC:     localhost:4317         (app → collector)
+#
+# Enable tracing in the app by setting:
+#   OTEL_ENABLED=true
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 services:
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -44,6 +52,33 @@ services:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
+    networks:
+      - repl-net
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: replsim-otel-collector
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    networks:
+      - repl-net
+    depends_on:
+      - jaeger
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: replsim-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317"         # OTLP gRPC (collector-internal; not exposed to host)
     networks:
       - repl-net
     restart: unless-stopped
