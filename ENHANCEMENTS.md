@@ -37,14 +37,17 @@ Effort key: **S** ≤ half-day · **M** 1–2 days · **L** 3–5 days · **XL**
 >   bracket from the Wing-Gong linearizability checker); `store.setReplay()` lets all 16
 >   components transparently render historical state. Verified: `go test -race ./...` green,
 >   10/10 bun unit tests, 54/54 E2E (9 new EPIC-B assertions).
-> - ✅ **EPIC C** — OpenTelemetry distributed tracing: `internal/telemetry` package with a
->   guarded provider (no-op unless `OTEL_ENABLED=true`). W3C `traceparent` extraction in a
->   Chi middleware; `orchestrator.write`, `orchestrator.read`, and `orchestrator.anti_entropy`
->   spans carry cluster/key/strategy/node attributes; trace context propagated across
->   goroutine boundaries via `events.Event.TraceCarrier`. OTel Collector + Jaeger service
->   added to `docker-compose.observability.yml`. 5 unit tests with in-memory exporter.
->   `go test -race ./...` all green.
-> - ⏳ **EPIC D** — OpenAPI→TypeScript contract-type generation.
+> - ✅ **EPIC C** — OpenTelemetry distributed tracing (shipped): guarded OTel SDK bootstrap
+>   (`OTEL_ENABLED=true`), W3C TraceContext HTTP middleware, trace-carrier propagation through
+>   the EventBus, spans on Write/Read/Delete/RunAntiEntropy, OTel Collector + Jaeger in compose,
+>   and an in-memory span-recorder test suite. No-op by default (zero overhead).
+> - ✅ **EPIC D** — OpenAPI→TypeScript contract-type generation (shipped): `openapi-typescript@7`
+>   generates `frontend/src/api/generated.ts` (50+ types, 40+ paths) from `gateway/openapi.yaml`.
+>   `types.ts` is now a thin alias layer over `components["schemas"]`; all consumers remain
+>   backward-compatible. CI runs `check:types-drift` (regenerate + `git diff --exit-code`) to
+>   catch spec/type skew. Contract tests validate required schemas and API paths. Regen workflow:
+>   run `bun run generate:types` from `frontend/` whenever `gateway/openapi.yaml` changes, then
+>   commit the updated `src/api/generated.ts`.
 >
 > **Out-of-repo (not code — cannot be produced/tested here):** a recorded demo video, a
 > hosted live deploy (Dockerfiles + compose make it `docker compose up`), a written
