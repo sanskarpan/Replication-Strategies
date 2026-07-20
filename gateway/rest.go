@@ -759,3 +759,105 @@ func (s *Server) handleRunScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, c.GetState())
 }
+
+// ---------------------------------------------------------------------------
+// Event history + linearizability (EPIC B)
+// ---------------------------------------------------------------------------
+
+// handleClusterHistory returns a page of events from the cluster's durable ring
+// buffer. Query params: from (seq, inclusive, default 0) and limit (default 500).
+func (s *Server) handleClusterHistory(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c, err := s.orch.GetCluster(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	var from, limit uint64
+	if v := r.URL.Query().Get("from"); v != "" {
+		from, _ = parseUint64(v)
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		limit, _ = parseUint64(v)
+	}
+	entries := c.EventHistory().Get(from, limit)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"cluster_id": id,
+		"max_seq":    c.EventHistory().MaxSeq(),
+		"entries":    entries,
+	})
+}
+
+// handleClusterHistoryState returns the nearest snapshot at or before the
+// requested seq plus the events that follow it, so the frontend can fold them to
+// reconstruct exact cluster state. Query param: at (seq, required).
+func (s *Server) handleClusterHistoryState(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c, err := s.orch.GetCluster(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	atStr := r.URL.Query().Get("at")
+	if atStr == "" {
+		writeError(w, http.StatusBadRequest, "at param required")
+		return
+	}
+	at, _ := parseUint64(atStr)
+	result := c.EventHistory().StateAt(at)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleClusterOps returns the Jepsen-compatible op history for the cluster
+// (client × invoke/complete intervals recorded by the linearizability checker).
+func (s *Server) handleClusterOps(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ops, err := s.orch.GetOps(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	type JepsenOp struct {
+		ClientID   string `json:"client_id"`
+		Kind       string `json:"kind"` // "write" | "read"
+		Key        string `json:"key"`
+		Value      string `json:"value"`
+		InvokeNs   int64  `json:"invoke_ns"`
+		CompleteNs int64  `json:"complete_ns"`
+	}
+	out := make([]JepsenOp, 0, len(ops))
+	for _, op := range ops {
+		kind := "read"
+		if op.Kind == 0 { // checker.OpWrite == 0
+			kind = "write"
+		}
+		out = append(out, JepsenOp{
+			ClientID:   op.ClientID,
+			Kind:       kind,
+			Key:        op.Key,
+			Value:      op.Value,
+			InvokeNs:   op.Invoke,
+			CompleteNs: op.Complete,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"cluster_id": id, "ops": out})
+}
+
+// handleClusterLinearize runs the Wing-Gong linearizability checker against the
+// cluster's recorded op history and annotates the result for Jepsen display.
+func (s *Server) handleClusterLinearize(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	lin, err := s.orch.CheckLinearizable(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, lin)
+}
+
+// parseUint64 converts a string to uint64, returning 0 on error.
+func parseUint64(s string) (uint64, error) {
+	var v uint64
+	_, err := fmt.Sscanf(s, "%d", &v)
+	return v, err
+}
