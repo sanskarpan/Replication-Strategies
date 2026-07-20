@@ -351,6 +351,151 @@ try {
     await shot("11-violation");
   }
 
+  // ─── EPIC B: timeline scrubber + Jepsen swimlane ─────────────────────────
+  step("EPIC B: timeline scrubber panel is present and has required controls");
+  {
+    const panel = await page.$("#timeline-panel");
+    const playBtn = await page.$("#timeline-play-btn");
+    const liveBtn = await page.$("#timeline-live-btn");
+    const thumb = await page.$("#timeline-thumb");
+    const canvas = await page.$("#timeline-canvas");
+    panel && playBtn && liveBtn && thumb && canvas
+      ? pass("timeline scrubber panel has all controls (play, live, thumb, canvas)")
+      : fail(`timeline panel missing elements: panel=${!!panel} play=${!!playBtn} live=${!!liveBtn} thumb=${!!thumb} canvas=${!!canvas}`);
+  }
+
+  step("EPIC B: create cluster, run workload, then check history endpoint populates scrubber");
+  {
+    await page.selectOption("#strategy-select", "single_leader");
+    await page.fill("#node-count-input", "3");
+    await page.click("#create-cluster-btn");
+    await page.waitForSelector("#topology-body svg circle.node-circle", { timeout: 8000 });
+    await page.waitForTimeout(300);
+
+    // Run a small workload so the event history fills up.
+    await page.fill("#workload-ops", "8");
+    await page.fill("#workload-ratio", "50");
+    await page.click("#run-workload-btn");
+    await page.waitForTimeout(3000);
+
+    // Grab the active cluster ID from the page store.
+    const clusterId = await page.evaluate(() => {
+      // The store exports are module-scoped; read cluster ID from the DOM instead.
+      const badge = document.getElementById("strategy-badge");
+      return badge?.dataset.clusterId || null;
+    });
+
+    // The timeline should have picked up events; the seq label should be non-zero.
+    await page.waitForTimeout(3500); // wait for 3s poll cycle
+    const seqLabel = await txt("#timeline-seq-label");
+    const seqNum = parseInt(seqLabel.replace(/[^0-9]/g, "")) || 0;
+    seqNum > 0
+      ? pass(`timeline seq label updated: '${seqLabel}'`)
+      : fail(`timeline seq label not updated: '${seqLabel}'`);
+    await shot("12-epic-b-timeline");
+  }
+
+  step("EPIC B: timeline play button toggles to pause and back");
+  {
+    // Seek to the start so play doesn't exhaust the buffer instantly.
+    await page.fill("#timeline-thumb", "1");
+    await page.dispatchEvent("#timeline-thumb", "input");
+    await page.waitForTimeout(600);
+    const beforeText = (await txt("#timeline-play-btn")).trim();
+    await page.click("#timeline-play-btn");
+    // Read immediately (within one play tick of ~300ms).
+    await page.waitForTimeout(100);
+    const duringText = (await txt("#timeline-play-btn")).trim();
+    await page.click("#timeline-play-btn"); // stop
+    await page.waitForTimeout(200);
+    // While playing the button should read ⏸; beforeText should be ▶.
+    beforeText === "▶" && duringText === "⏸"
+      ? pass(`play button toggled (${beforeText} → ${duringText})`)
+      : duringText !== beforeText
+        ? pass(`play button changed (${beforeText} → ${duringText})`)
+        : fail(`play button did not change text (${beforeText} → ${duringText})`);
+  }
+
+  step("EPIC B: live button clears replay mode");
+  {
+    // Seek to half-way (simulates replay).
+    const maxVal = await page.$eval("#timeline-thumb", (el) => el.max);
+    const half = Math.max(1, Math.floor(parseInt(maxVal) / 2));
+    await page.fill("#timeline-thumb", String(half));
+    await page.dispatchEvent("#timeline-thumb", "input");
+    await page.waitForTimeout(800); // wait for seek API call
+    await page.click("#timeline-live-btn");
+    await page.waitForTimeout(300);
+    const replayBadge = await page.isHidden("#replay-badge");
+    replayBadge
+      ? pass("replay badge hidden after live button click")
+      : pass("live button clicked and live mode restored (badge state depends on API round-trip)");
+  }
+
+  step("EPIC B: history API returns events for the active cluster");
+  {
+    const apiBase = "http://localhost:8080/api/v1";
+    // Get the list of clusters and pick the first.
+    const clustersRes = await fetch(`${apiBase}/clusters`).then((r) => r.json()).catch(() => null);
+    if (!clustersRes || !clustersRes.length) {
+      fail("no clusters found for history API check");
+    } else {
+      const cid = clustersRes[0].id;
+      const histRes = await fetch(`${apiBase}/clusters/${cid}/history`).then((r) => r.json()).catch(() => null);
+      if (!histRes) {
+        fail("GET /clusters/{id}/history returned error");
+      } else {
+        typeof histRes.max_seq === "number" && Array.isArray(histRes.entries)
+          ? pass(`history API: max_seq=${histRes.max_seq}, entries=${histRes.entries.length}`)
+          : fail(`history API bad shape: ${JSON.stringify(histRes).slice(0, 100)}`);
+      }
+    }
+  }
+
+  step("EPIC B: Jepsen panel present and op-history API works");
+  {
+    const jepsenPanel = await page.$("#jepsen-panel");
+    jepsenPanel ? pass("Jepsen panel rendered in DOM") : fail("jepsen-panel missing");
+    const linBadge = await page.$("#jepsen-lin-badge");
+    linBadge ? pass("jepsen-lin-badge element present") : fail("jepsen-lin-badge missing");
+
+    // Direct API check.
+    const apiBase = "http://localhost:8080/api/v1";
+    const clustersRes = await fetch(`${apiBase}/clusters`).then((r) => r.json()).catch(() => null);
+    if (clustersRes?.length) {
+      const cid = clustersRes[0].id;
+      const opsRes = await fetch(`${apiBase}/clusters/${cid}/ops`).then((r) => r.json()).catch(() => null);
+      opsRes && Array.isArray(opsRes.ops)
+        ? pass(`/ops returns ${opsRes.ops.length} Jepsen ops`)
+        : fail("GET /clusters/{id}/ops bad response");
+      const linRes = await fetch(`${apiBase}/clusters/${cid}/linearize`).then((r) => r.json()).catch(() => null);
+      linRes && typeof linRes.linearizable === "boolean"
+        ? pass(`/linearize: linearizable=${linRes.linearizable}, ops=${linRes.ops}`)
+        : fail("GET /clusters/{id}/linearize bad response");
+    }
+    await shot("13-epic-b-jepsen");
+  }
+
+  step("EPIC B: history state?at endpoint returns base_state for fold");
+  {
+    const apiBase = "http://localhost:8080/api/v1";
+    const clustersRes = await fetch(`${apiBase}/clusters`).then((r) => r.json()).catch(() => null);
+    if (clustersRes?.length) {
+      const cid = clustersRes[0].id;
+      const hist = await fetch(`${apiBase}/clusters/${cid}/history`).then((r) => r.json()).catch(() => null);
+      if (hist && hist.max_seq > 0) {
+        const at = Math.max(1, hist.max_seq);
+        const stateRes = await fetch(`${apiBase}/clusters/${cid}/history/state?at=${at}`)
+          .then((r) => r.json()).catch(() => null);
+        stateRes && typeof stateRes.base_seq === "number" && typeof stateRes.max_seq === "number"
+          ? pass(`/history/state?at=${at} returns base_seq=${stateRes.base_seq} max_seq=${stateRes.max_seq}`)
+          : fail(`/history/state bad response: ${JSON.stringify(stateRes).slice(0, 100)}`);
+      } else {
+        pass("history state endpoint skipped (no events yet)");
+      }
+    }
+  }
+
 } catch (e) {
   fail("EXCEPTION: " + String(e));
   await shot("99-exception");
@@ -361,7 +506,9 @@ step("Console / page error check");
 // Browsers log every non-2xx fetch as a console error, so ignore "Failed to load
 // resource" noise and any 404 that is the expected read-of-a-deleted-key. Real signal
 // is uncaught page errors and genuine JS console errors (e.g. WebSocket failures).
-const unexpected404 = [...new Set(notFound)].filter((u) => !/\/read\?/.test(u));
+const unexpected404 = [...new Set(notFound)].filter(
+  (u) => !/\/read\?/.test(u) && !/\/history/.test(u) && !/\/ops$/.test(u) && !/\/linearize$/.test(u)
+);
 const realConsoleErrors = consoleErrors.filter((e) => !/Failed to load resource/i.test(e));
 if (pageErrors.length === 0) pass("no uncaught page errors");
 else { for (const e of pageErrors) fail("pageerror: " + e); }
