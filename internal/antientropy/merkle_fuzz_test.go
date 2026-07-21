@@ -27,10 +27,10 @@ func kvFromBytes(b []byte) map[string]string {
 func FuzzMerkleTreeDiff(f *testing.F) {
 	// Seed corpus: empty maps, same key different value, different keys, subset.
 	f.Add([]byte{}, []byte{})
-	f.Add([]byte{0x01, 0x01, 0x00}, []byte{0x01, 0x02, 0x00}) // same key, different value
-	f.Add([]byte{0x01, 0x01, 0x00}, []byte{0x02, 0x02, 0x00}) // different keys
+	f.Add([]byte{0x01, 0x01, 0x00}, []byte{0x01, 0x02, 0x00})                   // same key, different value
+	f.Add([]byte{0x01, 0x01, 0x00}, []byte{0x02, 0x02, 0x00})                   // different keys
 	f.Add([]byte{0x01, 0x01, 0x00, 0x02, 0x02, 0x00}, []byte{0x01, 0x01, 0x00}) // extra key on left
-	f.Add([]byte{0x00, 0x00, 0x00}, []byte{0x00, 0x00, 0x00})                    // same key, same value
+	f.Add([]byte{0x00, 0x00, 0x00}, []byte{0x00, 0x00, 0x00})                   // same key, same value
 
 	f.Fuzz(func(t *testing.T, ab, bb []byte) {
 		a := kvFromBytes(ab)
