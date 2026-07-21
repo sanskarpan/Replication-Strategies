@@ -1,7 +1,7 @@
 import type { Component } from "../core/component";
 import type { VectorClock } from "../api/types";
 import { bus } from "../core/bus";
-import { req } from "../core/dom";
+import { req, esc } from "../core/dom";
 
 // ─── Conflict Log ─────────────────────────────────────────────────────────────
 const conflictsBody = req("conflicts-body");
@@ -59,7 +59,7 @@ function renderVCColumn(container: Element, vc: VectorClock, otherVc: VectorCloc
     const myVal = vc[node] ?? 0;
     const otherVal = otherVc[node] ?? 0;
     const cls = vcDiffClass(myVal, otherVal);
-    return `<div class="vci-entry ${cls}"><span class="vci-node">${node}</span><span class="vci-val">${myVal}</span></div>`;
+    return `<div class="vci-entry ${cls}"><span class="vci-node">${esc(node)}</span><span class="vci-val">${myVal}</span></div>`;
   }).join("");
 }
 
@@ -98,8 +98,8 @@ export const conflicts: Component = {
       div.title = "Click to inspect vector clock diff";
       div.style.cursor = "pointer";
       div.innerHTML = `
-        <div class="key">${d.key || "?"} <span style="color:var(--text-dim);font-size:9px">[click to inspect]</span></div>
-        <div class="vclock">local: ${JSON.stringify(d.local_vc || {})} | remote: ${JSON.stringify(d.remote_vc || {})}</div>
+        <div class="key">${esc(String(d.key || "?"))} <span style="color:var(--text-dim);font-size:9px">[click to inspect]</span></div>
+        <div class="vclock">local: ${esc(JSON.stringify(d.local_vc || {}))} | remote: ${esc(JSON.stringify(d.remote_vc || {}))}</div>
         <div style="color:var(--text-dim);font-size:10px">${new Date(evt.timestamp).toLocaleTimeString()}</div>
       `;
       div.addEventListener("click", () => {
@@ -112,22 +112,32 @@ export const conflicts: Component = {
 
     bus.on("conflict_resolved", (evt) => {
       const d = evt.data || {};
-      const first = conflictsBody.firstElementChild as HTMLElement | null;
-      if (first) {
-        // Attach resolver info to the stored payload so the inspector can show it.
-        try {
-          const p = JSON.parse(first.dataset.payload || "{}") as ConflictPayload;
-          p.resolver = String(d.resolver ?? "");
-          p.reason = String(d.reason ?? "");
-          first.dataset.payload = JSON.stringify(p);
-        } catch { /* ignore malformed payload */ }
-
-        const res = document.createElement("div");
-        res.className = "resolver";
-        res.style.cssText = "color:var(--accent2);font-size:10px;margin-top:2px";
-        res.textContent = `resolved: ${d.resolver} — ${d.reason || ""}`;
-        first.appendChild(res);
+      const resolvedKey = String(d.key ?? "");
+      // Find matching entry by key; fall back to most-recent if server omits key.
+      let target: HTMLElement | null = null;
+      if (resolvedKey) {
+        for (const child of Array.from(conflictsBody.children)) {
+          try {
+            const p = JSON.parse((child as HTMLElement).dataset.payload || "{}") as ConflictPayload;
+            if (p.key === resolvedKey) { target = child as HTMLElement; break; }
+          } catch { /* skip unparseable entries */ }
+        }
       }
+      if (!target) target = conflictsBody.firstElementChild as HTMLElement | null;
+      if (!target) return;
+
+      try {
+        const p = JSON.parse(target.dataset.payload || "{}") as ConflictPayload;
+        p.resolver = String(d.resolver ?? "");
+        p.reason = String(d.reason ?? "");
+        target.dataset.payload = JSON.stringify(p);
+      } catch { /* ignore malformed payload */ }
+
+      const res = document.createElement("div");
+      res.className = "resolver";
+      res.style.cssText = "color:var(--accent2);font-size:10px;margin-top:2px";
+      res.textContent = `resolved: ${d.resolver} — ${d.reason || ""}`;
+      target.appendChild(res);
     });
 
     // ─── Quorum / Read-Repair events ─────────────────────────────────────────
@@ -136,8 +146,8 @@ export const conflicts: Component = {
       const div = document.createElement("div");
       div.className = "conflict-entry";
       div.style.cssText = "border-left:3px solid var(--danger)";
-      div.innerHTML = `<div class="key" style="color:var(--danger)">Quorum FAILED: ${d.key || "?"}</div>
-        <div style="font-size:10px;color:var(--text-dim)">acked ${d.acked}/${d.w} required</div>`;
+      div.innerHTML = `<div class="key" style="color:var(--danger)">Quorum FAILED: ${esc(String(d.key || "?"))}</div>
+        <div style="font-size:10px;color:var(--text-dim)">acked ${Number(d.acked)}/${Number(d.w)} required</div>`;
       conflictsBody.prepend(div);
       if (conflictsBody.children.length > 50) conflictsBody.lastChild?.remove();
     });
@@ -148,8 +158,8 @@ export const conflicts: Component = {
       const div = document.createElement("div");
       div.className = "conflict-entry";
       div.style.cssText = "border-left:3px solid var(--accent2)";
-      div.innerHTML = `<div class="key" style="color:var(--accent2)">Read Repair: ${d.key || "?"}</div>
-        <div style="font-size:10px;color:var(--text-dim)">stale: ${JSON.stringify(d.stale_nodes)}</div>`;
+      div.innerHTML = `<div class="key" style="color:var(--accent2)">Read Repair: ${esc(String(d.key || "?"))}</div>
+        <div style="font-size:10px;color:var(--text-dim)">stale: ${esc(JSON.stringify(d.stale_nodes))}</div>`;
       conflictsBody.prepend(div);
       if (conflictsBody.children.length > 50) conflictsBody.lastChild?.remove();
     });
