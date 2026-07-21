@@ -8,6 +8,12 @@ simulation:
   heartbeat_interval_ms: 50
   max_clusters: 10
 
+persistence:
+  # SQLite database path.  Leave empty to disable persistence (pure in-memory).
+  # Override at runtime with the SQLITE_PATH env var.
+  # Use ":memory:" for an ephemeral in-process database (useful for testing).
+  sqlite_path: "./data/simulation.db"
+
 defaults:
   single_leader:
     nodes: 4
