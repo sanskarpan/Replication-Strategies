@@ -1,8 +1,34 @@
 import type { Component } from "../core/component";
 import { api } from "../api/client";
+import { bus } from "../core/bus";
+import { store } from "../core/store";
 import { esc, decodeB64, byId, req, shortId } from "../core/dom";
 import { vcChipsHTML } from "../core/format";
 import { reportError } from "../core/toast";
+
+// ─── Per-node LWW conflict counters ──────────────────────────────────────────
+// Keyed by "clusterId/nodeId"; incremented on every conflict_detected event.
+const conflictCounters = new Map<string, number>();
+
+function conflictKey(clusterId: string, nodeId: string): string {
+  return `${clusterId}/${nodeId}`;
+}
+
+function conflictSectionHTML(clusterId: string, nodeId: string): string {
+  const count = conflictCounters.get(conflictKey(clusterId, nodeId)) ?? 0;
+  const resolver = store.getActive()?.config?.conflict_resolver ?? "—";
+  const hasConflicts = count > 0;
+  return `
+    <div class="drawer-section-title">Conflict Stats</div>
+    <table class="drawer-table">
+      <tbody>
+        <tr><td>Resolver</td><td><code>${esc(String(resolver))}</code></td></tr>
+        <tr><td>Conflicts detected</td>
+            <td class="lww-count${hasConflicts ? " lww-has-conflicts" : ""}">${count}</td></tr>
+      </tbody>
+    </table>
+  `;
+}
 
 // ─── Per-node inspector drawer ──────────────────────────────────────────────────
 let inspectorNode: { clusterId: string; nodeId: string } | null = null;
@@ -46,6 +72,7 @@ export async function openInspector(clusterId: string, nodeId: string) {
           <td>${esc(shortId(l.origin_id || ""))}</td>
         </tr>`).join("");
     body.innerHTML = `
+      ${conflictSectionHTML(clusterId, nodeId)}
       <div class="drawer-section-title">Store (${Object.keys(storeSnap || {}).length} keys)</div>
       ${storeRows ? `<table class="drawer-table" id="inspector-store">
         <thead><tr><th>key</th><th>value</th><th>ver</th><th>vclock</th></tr></thead>
@@ -78,6 +105,13 @@ export const inspector: Component & { refreshIfOpen(): void } = {
   id: "inspector",
   mount() {
     byId("inspector-close")?.addEventListener("click", closeInspector);
+    bus.on("conflict_detected", (evt) => {
+      const nid = evt.node_id;
+      const cid = evt.cluster_id;
+      if (!nid || !cid) return;
+      const key = conflictKey(cid, nid);
+      conflictCounters.set(key, (conflictCounters.get(key) ?? 0) + 1);
+    });
   },
   refreshIfOpen,
 };

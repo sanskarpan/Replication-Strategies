@@ -22,6 +22,26 @@ const topoGuard = renderGuard();
 // Live node positions from the force sim, used to tween dots along links.
 const nodePos = new Map<string, { x: number; y: number }>();
 
+// ─── Per-link throughput tracking ────────────────────────────────────────────
+interface LinkStat { count: number; windowStart: number; rate: number; }
+// Key: "sourceId→targetId" (directed, matching D3 link direction)
+const linkStats = new Map<string, LinkStat>();
+const RATE_WINDOW_MS = 2000;
+
+function recordPacket(from: string, to: string) {
+  const key = `${from}→${to}`;
+  const now = Date.now();
+  const stat = linkStats.get(key) ?? { count: 0, windowStart: now, rate: 0 };
+  stat.count++;
+  const elapsed = now - stat.windowStart;
+  if (elapsed >= RATE_WINDOW_MS) {
+    stat.rate = Math.round((stat.count / elapsed) * 1000);
+    stat.count = 0;
+    stat.windowStart = now;
+  }
+  linkStats.set(key, stat);
+}
+
 function partitionSet(cluster: ClusterState): Set<string> {
   const partitioned = new Set<string>();
   for (const part of Object.values(cluster.partitions || {})) {
@@ -70,6 +90,7 @@ function renderTopology(cluster: ClusterState) {
       .attr("width", "100%").attr("height", "100%")
       .attr("viewBox", `0 0 ${W} ${H}`);
     topoSvg.append("g").attr("class", "links");
+    topoSvg.append("g").attr("class", "throughput-labels");
     topoSvg.append("g").attr("class", "nodes");
   }
 
@@ -183,9 +204,30 @@ function renderTopology(cluster: ClusterState) {
       .attr("x2", (d) => (d.target as TopoNode).x!)
       .attr("y2", (d) => (d.target as TopoNode).y!);
     nodeSel.attr("transform", (d) => `translate(${d.x!},${d.y!})`);
-    // Keep a live position lookup for packet animation.
     nodePos.clear();
     for (const n of nodes) if (n.x != null && n.y != null) nodePos.set(n.id, { x: n.x, y: n.y });
+
+    // Render per-link throughput labels at the midpoint of each directed link.
+    svg.select<SVGGElement>(".throughput-labels")
+      .selectAll<SVGTextElement, TopoLink>("text.link-throughput")
+      .data(links, (d) => `${(d.source as TopoNode).id}→${(d.target as TopoNode).id}`)
+      .join("text")
+      .attr("class", "link-throughput")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr("fill", "var(--text-dim)")
+      .attr("opacity", 0.8)
+      .style("font-size", "9px")
+      .style("pointer-events", "none")
+      .attr("x", (d) => ((d.source as TopoNode).x! + (d.target as TopoNode).x!) / 2)
+      .attr("y", (d) => ((d.source as TopoNode).y! + (d.target as TopoNode).y!) / 2 - 8)
+      .text((d) => {
+        const src = (d.source as TopoNode).id;
+        const tgt = (d.target as TopoNode).id;
+        const stat = linkStats.get(`${src}→${tgt}`);
+        if (!stat || stat.count === 0) return "";
+        return stat.rate > 0 ? `${stat.count} (${stat.rate}/s)` : `${stat.count}`;
+      });
   });
 }
 
@@ -202,6 +244,7 @@ export function animatePacket(from: string, to: string, type: string, dropped = 
   const a = nodePos.get(from);
   const b = nodePos.get(to);
   if (!a || !b) return;
+  recordPacket(from, to);
   const layer = topoSvg.select<SVGGElement>(".nodes"); // draw above links
   const dot = layer.append("circle")
     .attr("class", "packet")

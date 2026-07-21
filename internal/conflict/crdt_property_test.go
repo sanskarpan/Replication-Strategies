@@ -3,6 +3,7 @@ package conflict
 import (
 	"fmt"
 	"reflect"
+	"replication-strategies/internal/storage"
 	"sort"
 	"testing"
 	"testing/quick"
@@ -251,5 +252,46 @@ func TestLWWMapMergeProperties(t *testing.T) {
 	}
 	if err := quick.Check(idempotent, quickCfg); err != nil {
 		t.Fatalf("LWW-Map merge not idempotent: %v", err)
+	}
+}
+
+// TestConflictResolutionDeterminism verifies that LWWResolver is deterministic
+// (same input → same output on repeated calls) and call-order independent
+// (swapping Local/Remote yields the same winning node, because the winner is
+// defined by timestamp + nodeID tiebreak, not by argument position).
+func TestConflictResolutionDeterminism(t *testing.T) {
+	mkEntry := func(ts int64, nodeIdx int) *storage.KVEntry {
+		if nodeIdx < 0 {
+			nodeIdx = -nodeIdx
+		}
+		node := nodeIDs[nodeIdx%len(nodeIDs)]
+		return &storage.KVEntry{
+			Key:       "k",
+			Value:     []byte(node),
+			Timestamp: ts % 1000,
+			NodeID:    node,
+			VClock:    storage.NewVectorClock(),
+		}
+	}
+
+	deterministic := func(lts, rts int64, li, ri int) bool {
+		local := mkEntry(lts, li)
+		remote := mkEntry(rts, ri)
+		c := &Conflict{ID: "c1", Key: "k", Local: local, Remote: remote, NodeID: local.NodeID}
+
+		r := NewLWWResolver()
+		res1 := r.Resolve(c)
+		res2 := r.Resolve(c)
+		if res1.Winner.NodeID != res2.Winner.NodeID || res1.Winner.Timestamp != res2.Winner.Timestamp {
+			return false
+		}
+
+		// Call-order independence: the same node wins regardless of local/remote assignment.
+		cSwap := &Conflict{ID: "c2", Key: "k", Local: remote, Remote: local, NodeID: remote.NodeID}
+		resSwap := r.Resolve(cSwap)
+		return res1.Winner.NodeID == resSwap.Winner.NodeID
+	}
+	if err := quick.Check(deterministic, quickCfg); err != nil {
+		t.Fatalf("LWWResolver not deterministic or call-order independent: %v", err)
 	}
 }
