@@ -551,6 +551,10 @@ kbd {
 .jepsen-grid text { fill: var(--text-dim); font-size: 10px; }
 .jepsen-grid line, .jepsen-grid path { stroke: var(--border); }
 
+/* ─── §2.3: LWW conflict counter in inspector drawer ────────────────────── */
+.lww-count { font-weight: 700; font-family: monospace; }
+.lww-has-conflicts { color: var(--warn); }
+
 /* ─── §2.2: Vector-clock causal inspector dialog ────────────────────────── */
 .vci-dialog {
   background: var(--surface2); color: var(--text); border: 1px solid var(--border);
