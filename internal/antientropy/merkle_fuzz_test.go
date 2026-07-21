@@ -15,7 +15,8 @@ func kvFromBytes(b []byte) map[string]string {
 		case 0:
 			kv[key] = string([]byte{b[i+1]})
 		case 1:
-			kv[key] = string([]byte{b[i+1] + 1})
+			// Use XOR to avoid 0xFF+1 overflow wrapping back to 0x00.
+			kv[key] = string([]byte{b[i+1] ^ 0xFF})
 		case 2:
 			delete(kv, key)
 		}
@@ -51,9 +52,15 @@ func FuzzMerkleTreeDiff(f *testing.F) {
 		}
 
 		// Property 2: Soundness — every key in diff actually differs between a and b.
+		// Check existence explicitly to avoid zero-value aliasing (missing key returns "").
 		for _, k := range diff {
-			if a[k] == b[k] {
-				t.Fatalf("unsound: key %q in diff but a[k]==%q==b[k]", k, a[k])
+			va, aOk := a[k]
+			vb, bOk := b[k]
+			if !aOk && !bOk {
+				t.Fatalf("unsound: key %q in diff but present in neither map", k)
+			}
+			if aOk && bOk && va == vb {
+				t.Fatalf("unsound: key %q in diff but same value %q in both maps", k, va)
 			}
 		}
 
