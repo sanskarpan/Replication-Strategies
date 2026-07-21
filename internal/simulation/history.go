@@ -1,9 +1,12 @@
 package simulation
 
 import (
+	"encoding/json"
+	"log/slog"
 	"sync"
 
 	"replication-strategies/internal/events"
+	"replication-strategies/internal/persistence"
 )
 
 const (
@@ -23,16 +26,49 @@ type HistoryEntry struct {
 // ClusterEventHistory is a bounded, ordered per-cluster event log with periodic
 // ClusterState snapshots so callers can reconstruct cluster state at any seq number.
 type ClusterEventHistory struct {
-	mu      sync.RWMutex
-	entries []HistoryEntry
-	maxSize int
-	seq     uint64
+	mu        sync.RWMutex
+	clusterID string
+	db        *persistence.Store // nil when running without persistence
+	entries   []HistoryEntry
+	maxSize   int
+	seq       uint64
 }
 
-func newClusterEventHistory() *ClusterEventHistory {
+func newClusterEventHistory(clusterID string, db *persistence.Store) *ClusterEventHistory {
 	return &ClusterEventHistory{
-		entries: make([]HistoryEntry, 0, historyMaxSize),
-		maxSize: historyMaxSize,
+		clusterID: clusterID,
+		db:        db,
+		entries:   make([]HistoryEntry, 0, historyMaxSize),
+		maxSize:   historyMaxSize,
+	}
+}
+
+// loadRows bulk-loads persisted history into the ring buffer.
+// Must be called before any goroutine can access h (no lock taken).
+// After this call h.seq equals the highest stored seq, so new Append
+// calls continue numbering from where persistence left off.
+func (h *ClusterEventHistory) loadRows(rows []persistence.HistoryRow) {
+	for _, r := range rows {
+		var evt events.Event
+		if err := json.Unmarshal(r.EventJSON, &evt); err != nil {
+			slog.Warn("history restore: skip bad event", "cluster", h.clusterID, "seq", r.Seq, "error", err)
+			continue
+		}
+		var snap *ClusterState
+		if r.StateJSON != nil {
+			var s ClusterState
+			if err := json.Unmarshal(r.StateJSON, &s); err == nil {
+				snap = &s
+			}
+		}
+		entry := HistoryEntry{Seq: r.Seq, Event: evt, State: snap}
+		if len(h.entries) >= h.maxSize {
+			h.entries = h.entries[1:]
+		}
+		h.entries = append(h.entries, entry)
+		if r.Seq > h.seq {
+			h.seq = r.Seq
+		}
 	}
 }
 
@@ -64,6 +100,20 @@ func (h *ClusterEventHistory) Append(evt events.Event, getSnapshot func() Cluste
 		h.entries = h.entries[1:]
 	}
 	h.entries = append(h.entries, entry)
+
+	// Persist to SQLite when a store is wired in.
+	if h.db != nil {
+		evtJSON, err := json.Marshal(evt)
+		if err == nil {
+			var stateJSON []byte
+			if snap != nil {
+				stateJSON, _ = json.Marshal(snap)
+			}
+			if err := h.db.AppendHistoryEntry(h.clusterID, h.seq, evtJSON, stateJSON); err != nil {
+				slog.Warn("history persist failed", "cluster", h.clusterID, "seq", h.seq, "error", err)
+			}
+		}
+	}
 }
 
 // Get returns entries with Seq >= from, up to limit (capped at 500).

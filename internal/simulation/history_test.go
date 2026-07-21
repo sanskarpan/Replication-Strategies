@@ -15,7 +15,7 @@ func noSnapshot() ClusterState { return ClusterState{} }
 
 // TestHistoryAppendAndGet verifies sequential seq assignment and range queries.
 func TestHistoryAppendAndGet(t *testing.T) {
-	h := newClusterEventHistory()
+	h := newClusterEventHistory("test-cluster", nil)
 	for i := 0; i < 10; i++ {
 		h.Append(makeEvt(events.EvtWriteReceived, "c1"), noSnapshot)
 	}
@@ -61,7 +61,7 @@ func TestHistoryRingBuffer(t *testing.T) {
 
 // TestHistorySnapshotOnStructural verifies that structural events always carry a snapshot.
 func TestHistorySnapshotOnStructural(t *testing.T) {
-	h := newClusterEventHistory()
+	h := newClusterEventHistory("test-cluster", nil)
 	snapCalled := false
 	snap := func() ClusterState {
 		snapCalled = true
@@ -82,7 +82,7 @@ func TestHistorySnapshotOnStructural(t *testing.T) {
 
 // TestHistorySnapshotInterval verifies periodic snapshots fire every 50 entries.
 func TestHistorySnapshotInterval(t *testing.T) {
-	h := newClusterEventHistory()
+	h := newClusterEventHistory("test-cluster", nil)
 	snapCount := 0
 	snap := func() ClusterState {
 		snapCount++
@@ -138,7 +138,7 @@ func TestHistoryStateAt(t *testing.T) {
 
 // TestHistoryGetLimit verifies the 500-entry cap.
 func TestHistoryGetLimit(t *testing.T) {
-	h := newClusterEventHistory()
+	h := newClusterEventHistory("test-cluster", nil)
 	for i := 0; i < 200; i++ {
 		h.Append(makeEvt(events.EvtWriteReceived, "c6"), noSnapshot)
 	}

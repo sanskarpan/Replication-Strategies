@@ -15,6 +15,7 @@ import (
 	"replication-strategies/gateway"
 	"replication-strategies/internal/config"
 	"replication-strategies/internal/events"
+	"replication-strategies/internal/persistence"
 	"replication-strategies/internal/simulation"
 	"replication-strategies/internal/telemetry"
 )
@@ -41,23 +42,28 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 	slog.SetDefault(logger)
 
-	// Load and validate config before starting any long-lived resources so early
-	// failures are fast and the OTel defer below is never skipped by os.Exit.
-	cfg, err := config.Load(*configPath)
+	if err := run(*configPath); err != nil {
+		slog.Error("startup failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+// run contains all startup logic so that deferred cleanup (OTel, DB) always
+// executes on return — os.Exit in main() fires before any defers are registered.
+func run(configPath string) error {
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		slog.Warn("config load warning (using defaults where needed)", "error", err)
 	}
 	cfg.ApplyEnvOverrides()
 	if err := cfg.Validate(); err != nil {
-		slog.Error("invalid configuration", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	// OpenTelemetry tracing — no-op when OTEL_ENABLED != "true".
 	otelShutdown, otelErr := telemetry.Init(context.Background(), "replsim", version)
 	if otelErr != nil {
-		slog.Error("OTel init failed", "error", otelErr)
-		os.Exit(1)
+		return fmt.Errorf("OTel init: %w", otelErr)
 	}
 	defer func() {
 		if serr := otelShutdown(context.Background()); serr != nil {
@@ -68,6 +74,24 @@ func main() {
 	bus := events.NewEventBus(1000)
 	orch := simulation.NewOrchestrator(bus)
 	orch.SetMaxClusters(cfg.Simulation.MaxClusters)
+
+	// Attach SQLite persistence when a path is configured.
+	if sqlitePath := cfg.Persistence.SQLitePath; sqlitePath != "" {
+		db, dbErr := persistence.Open(sqlitePath)
+		if dbErr != nil {
+			return fmt.Errorf("persistence: open %s: %w", sqlitePath, dbErr)
+		}
+		defer func() {
+			if cerr := db.Close(); cerr != nil {
+				slog.Warn("persistence: close error", "error", cerr)
+			}
+		}()
+		orch.WithPersistence(db)
+		if restoreErr := orch.Restore(); restoreErr != nil {
+			return fmt.Errorf("persistence: restore: %w", restoreErr)
+		}
+		slog.Info("persistence: SQLite attached", "path", sqlitePath)
+	}
 
 	srv := gateway.NewServer(orch, bus, cfg.Server.CORSOrigins)
 	srv.SetBuildInfo(version, commit, date)
@@ -92,7 +116,6 @@ func main() {
 		slog.Info("server listening", "addr", addr, "max_clusters", cfg.Simulation.MaxClusters, "version", version)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("HTTP server error", "error", err)
-			os.Exit(1)
 		}
 	}()
 
@@ -106,6 +129,7 @@ func main() {
 		slog.Error("shutdown error", "error", err)
 	}
 	slog.Info("server stopped")
+	return nil
 }
 
 // logLevel reads LOG_LEVEL (debug|info|warn|error), defaulting to info.

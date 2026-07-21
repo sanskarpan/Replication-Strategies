@@ -26,6 +26,21 @@ page.on("response", (r) => { if (r.status() === 404) notFound.push(`${r.request(
 async function shot(name) { await page.screenshot({ path: `${SHOT}/${name}.png`, fullPage: false }); }
 const txt = async (sel) => (await page.textContent(sel).catch(() => "")) || "";
 
+const API = "http://localhost:8080/api/v1";
+
+// Wipe any clusters left over from previous runs (e.g. from SQLite persistence).
+async function cleanupClusters() {
+  try {
+    const res = await fetch(`${API}/clusters`);
+    if (!res.ok) return;
+    const clusters = await res.json();
+    for (const c of clusters) {
+      await fetch(`${API}/clusters/${c.id}`, { method: "DELETE" });
+    }
+  } catch { /* server not yet up — first page.goto will surface any real error */ }
+}
+await cleanupClusters();
+
 try {
   step("Load page");
   await page.goto(BASE, { waitUntil: "networkidle", timeout: 15000 });
