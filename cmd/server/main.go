@@ -15,6 +15,7 @@ import (
 	"replication-strategies/gateway"
 	"replication-strategies/internal/config"
 	"replication-strategies/internal/events"
+	"replication-strategies/internal/persistence"
 	"replication-strategies/internal/simulation"
 	"replication-strategies/internal/telemetry"
 )
@@ -68,6 +69,26 @@ func main() {
 	bus := events.NewEventBus(1000)
 	orch := simulation.NewOrchestrator(bus)
 	orch.SetMaxClusters(cfg.Simulation.MaxClusters)
+
+	// Attach SQLite persistence when a path is configured.
+	if sqlitePath := cfg.Persistence.SQLitePath; sqlitePath != "" {
+		db, err := persistence.Open(sqlitePath)
+		if err != nil {
+			slog.Error("persistence: failed to open database", "path", sqlitePath, "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			if cerr := db.Close(); cerr != nil {
+				slog.Warn("persistence: close error", "error", cerr)
+			}
+		}()
+		orch.WithPersistence(db)
+		if err := orch.Restore(); err != nil {
+			slog.Error("persistence: restore failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("persistence: SQLite attached", "path", sqlitePath)
+	}
 
 	srv := gateway.NewServer(orch, bus, cfg.Server.CORSOrigins)
 	srv.SetBuildInfo(version, commit, date)
