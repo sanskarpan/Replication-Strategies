@@ -82,3 +82,18 @@ func TestVectorClockHappensBeforeProperties(t *testing.T) {
 		t.Fatalf("HappensBefore not antisymmetric: %v", err)
 	}
 }
+
+// TestVectorClockLatticeUpperBound verifies the join-semilattice upper-bound
+// property: Merge(a,b) must dominate (≥ component-wise) both a and b.
+// The existing merge tests cover commutativity, associativity, and idempotence;
+// this test makes the upper-bound guarantee explicit via Dominates().
+func TestVectorClockLatticeUpperBound(t *testing.T) {
+	upperBound := func(a, b []int) bool {
+		x, y := vcFrom(a), vcFrom(b)
+		merged := mergedClone(x, y)
+		return merged.Dominates(x) && merged.Dominates(y)
+	}
+	if err := quick.Check(upperBound, vcQuickCfg); err != nil {
+		t.Fatalf("VectorClock.Merge is not a join-semilattice upper bound: %v", err)
+	}
+}
