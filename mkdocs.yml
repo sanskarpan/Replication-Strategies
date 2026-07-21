@@ -1,0 +1,87 @@
+site_name: Replication Strategies
+site_description: >-
+  An interactive distributed-systems simulator that implements and visualizes
+  single-leader, multi-leader, leaderless, and Raft replication side by side
+  with real network-fault injection.
+site_url: https://sanskarpan.github.io/Replication-Strategies/
+repo_url: https://github.com/sanskarpan/Replication-Strategies
+repo_name: sanskarpan/Replication-Strategies
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Quick Start: quickstart.md
+  - Architecture: architecture.md
+  - Replication Strategies:
+    - Overview: strategies/index.md
+    - Single-Leader: strategies/single-leader.md
+    - Multi-Leader: strategies/multi-leader.md
+    - Leaderless (Dynamo): strategies/leaderless.md
+    - Raft (Consensus): strategies/raft.md
+  - Concepts:
+    - Fault Injection: concepts/fault-injection.md
+    - Correctness Checking: concepts/correctness.md
+    - Conflict Resolution: concepts/conflict-resolution.md
+  - API Reference: API.md
+  - CLI Reference: CLI.md
+  - Persistence: persistence.md
+  - Observability: observability.md
+  - ADRs:
+    - Overview: adr/index.md
+    - "ADR 0001: Record Architecture Decisions": adr/0001-record-architecture-decisions.md
+    - "ADR 0002: Node Model & Transport": adr/0002-replication-strategy-node-model.md
+    - "ADR 0003: Consistent Hashing & Quorums": adr/0003-consistent-hashing-and-quorums.md
+  - Contributing: contributing.md
+
+plugins:
+  - search
+
+exclude_docs: "superpowers/**"
+
+validation:
+  nav:
+    omitted_files: info
+    not_found: warn
+  links:
+    not_found: ignore
