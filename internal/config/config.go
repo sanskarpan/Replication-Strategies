@@ -20,6 +20,12 @@ type Config struct {
 		HeartbeatIntervalMs   int `yaml:"heartbeat_interval_ms"`
 		MaxClusters           int `yaml:"max_clusters"`
 	} `yaml:"simulation"`
+	Persistence struct {
+		// SQLitePath is the file path for the SQLite database.
+		// Use ":memory:" for a transient in-process database.
+		// Leave empty ("") to disable persistence entirely.
+		SQLitePath string `yaml:"sqlite_path"`
+	} `yaml:"persistence"`
 }
 
 // Defaults returns the built-in configuration used when config.yaml is absent or
@@ -77,6 +83,9 @@ func (c *Config) ApplyEnvOverrides() {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Simulation.MaxClusters = n
 		}
+	}
+	if v := os.Getenv("SQLITE_PATH"); v != "" {
+		c.Persistence.SQLitePath = v
 	}
 	if v := os.Getenv("CORS_ORIGINS"); v != "" {
 		parts := strings.Split(v, ",")
