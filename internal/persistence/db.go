@@ -23,7 +23,7 @@ type Store struct {
 // Pass ":memory:" for a transient in-process database (useful in tests).
 func Open(path string) (*Store, error) {
 	if path != ":memory:" {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return nil, fmt.Errorf("persistence: mkdir %s: %w", filepath.Dir(path), err)
 		}
 	}
