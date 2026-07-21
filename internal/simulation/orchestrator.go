@@ -2,7 +2,9 @@ package simulation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"replication-strategies/internal/failure"
 	"replication-strategies/internal/metrics"
 	"replication-strategies/internal/node"
+	"replication-strategies/internal/persistence"
 	"replication-strategies/internal/quorum"
 	"replication-strategies/internal/storage"
 	"replication-strategies/internal/telemetry"
@@ -129,6 +132,7 @@ type Orchestrator struct {
 	bus         *events.EventBus
 	maxClusters int // 0 = unlimited
 	scenarios   *scenarioTracker
+	db          *persistence.Store // nil when running without persistence
 }
 
 // NewOrchestrator creates a new Orchestrator backed by the given EventBus.
@@ -140,6 +144,66 @@ func NewOrchestrator(bus *events.EventBus) *Orchestrator {
 	}
 }
 
+// WithPersistence attaches a SQLite store to the orchestrator.
+// Call before Restore() and before accepting any traffic.
+func (o *Orchestrator) WithPersistence(db *persistence.Store) {
+	o.db = db
+}
+
+// persistCluster upserts the cluster's metadata record.
+// Safe to call concurrently; failures are logged and do not abort the caller.
+func (o *Orchestrator) persistCluster(c *Cluster) {
+	if o.db == nil {
+		return
+	}
+	c.mu.RLock()
+	cfgJSON, _ := json.Marshal(c.Config)
+	nodeIDs := append([]string{}, c.NodeIDs...)
+	leaderID := c.LeaderID
+	createdAt := c.created.UnixNano()
+	c.mu.RUnlock()
+	if err := o.db.SaveCluster(c.ID, cfgJSON, nodeIDs, leaderID, createdAt); err != nil {
+		slog.Warn("persist cluster failed", "id", c.ID, "error", err)
+	}
+}
+
+// Restore loads all persisted clusters from the database and starts them.
+// Call once at startup after WithPersistence, before serving traffic.
+func (o *Orchestrator) Restore() error {
+	if o.db == nil {
+		return nil
+	}
+	records, err := o.db.LoadClusters()
+	if err != nil {
+		return fmt.Errorf("restore: %w", err)
+	}
+	for _, r := range records {
+		var cfg ClusterConfig
+		if err := json.Unmarshal(r.Config, &cfg); err != nil {
+			slog.Warn("restore: skip cluster with invalid config", "id", r.ID, "error", err)
+			continue
+		}
+		// Load stored history BEFORE starting goroutines so seq numbers are correct.
+		var preload []persistence.HistoryRow
+		rows, hErr := o.db.LoadHistory(r.ID, historyMaxSize)
+		if hErr != nil {
+			slog.Warn("restore: history load failed", "id", r.ID, "error", hErr)
+		} else {
+			preload = rows
+		}
+		cluster, err := o.createClusterCore(r.ID, cfg, time.Unix(0, r.CreatedAt), preload)
+		if err != nil {
+			slog.Warn("restore: skip cluster", "id", r.ID, "error", err)
+			continue
+		}
+		o.mu.Lock()
+		o.clusters[r.ID] = cluster
+		o.mu.Unlock()
+		slog.Info("restore: cluster loaded", "id", r.ID, "strategy", string(cfg.Strategy), "history_entries", len(preload))
+	}
+	return nil
+}
+
 // SetMaxClusters bounds the number of concurrently live clusters (0 = unlimited).
 // This enforces the config.yaml `max_clusters` limit and prevents unbounded
 // goroutine/memory growth from repeated cluster creation.
@@ -149,31 +213,22 @@ func (o *Orchestrator) SetMaxClusters(n int) {
 	o.mu.Unlock()
 }
 
-// CreateCluster provisions a new cluster according to cfg.
-func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
-	if cfg.NodeCount < 1 {
-		cfg.NodeCount = 3
-	}
-	if cfg.ReplicationMode == "" {
-		cfg.ReplicationMode = node.ModeAsync
-	}
-
-	// Fast-fail before building/starting nodes when already at the cluster cap.
-	o.mu.RLock()
-	atCap := o.maxClusters > 0 && len(o.clusters) >= o.maxClusters
-	max := o.maxClusters
-	o.mu.RUnlock()
-	if atCap {
-		return nil, fmt.Errorf("cluster limit reached (max %d)", max)
-	}
-
-	clusterID := uuid.New().String()
+// createClusterCore allocates a Cluster, wires nodes, and starts goroutines.
+// preload is a slice of raw history rows to seed the ring buffer BEFORE the
+// drain goroutine starts, guaranteeing correct seq numbering on restore.
+// It does NOT add the cluster to o.clusters or publish events.
+func (o *Orchestrator) createClusterCore(id string, cfg ClusterConfig, created time.Time, preload []persistence.HistoryRow) (*Cluster, error) {
 	fabric := transport.NewNetworkFabric()
-	clusterMetrics := metrics.NewClusterMetrics(clusterID, string(cfg.Strategy))
+	clusterMetrics := metrics.NewClusterMetrics(id, string(cfg.Strategy))
 	ctx, cancel := context.WithCancel(context.Background())
 
+	h := newClusterEventHistory(id, o.db)
+	if len(preload) > 0 {
+		h.loadRows(preload) // seeds seq; must happen before drain goroutine starts
+	}
+
 	cluster := &Cluster{
-		ID:           clusterID,
+		ID:           id,
 		Config:       cfg,
 		Nodes:        make(map[string]node.Node),
 		NodeIDs:      make([]string, 0, cfg.NodeCount),
@@ -181,13 +236,12 @@ func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
 		Metrics:      clusterMetrics,
 		detector:     failure.NewDetector(),
 		history:      &checker.History{},
-		eventHistory: newClusterEventHistory(),
+		eventHistory: h,
 		ctx:          ctx,
 		cancel:       cancel,
-		created:      time.Now(),
+		created:      created,
 	}
 
-	// Create nodes based on strategy.
 	switch cfg.Strategy {
 	case node.StrategySingleLeader:
 		if err := o.createSingleLeaderCluster(cluster, cfg); err != nil {
@@ -214,29 +268,54 @@ func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
 		return nil, fmt.Errorf("unknown strategy: %s", cfg.Strategy)
 	}
 
-	// Assign nodes to regions and apply inter-region latency before traffic starts.
 	o.assignRegions(cluster, cfg)
-
-	// Start all nodes.
 	for _, n := range cluster.Nodes {
 		n.Start(ctx)
 	}
-	// Feed the phi-accrual detector with heartbeats from online nodes.
 	go o.runHeartbeats(cluster)
-	// Drain the event bus into the cluster's durable event history.
 	go o.drainClusterHistory(cluster)
+	return cluster, nil
+}
 
+// CreateCluster provisions a new cluster according to cfg.
+func (o *Orchestrator) CreateCluster(cfg ClusterConfig) (*Cluster, error) {
+	if cfg.NodeCount < 1 {
+		cfg.NodeCount = 3
+	}
+	if cfg.ReplicationMode == "" {
+		cfg.ReplicationMode = node.ModeAsync
+	}
+
+	// Fast-fail before building/starting nodes when already at the cluster cap.
+	o.mu.RLock()
+	atCap := o.maxClusters > 0 && len(o.clusters) >= o.maxClusters
+	max := o.maxClusters
+	o.mu.RUnlock()
+	if atCap {
+		return nil, fmt.Errorf("cluster limit reached (max %d)", max)
+	}
+
+	clusterID := uuid.New().String()
+	cluster, err := o.createClusterCore(clusterID, cfg, time.Now(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Register — re-check cap under write lock to close the TOCTOU window.
 	o.mu.Lock()
 	if o.maxClusters > 0 && len(o.clusters) >= o.maxClusters {
 		o.mu.Unlock()
-		cancel()
+		cluster.cancel()
 		for _, n := range cluster.Nodes {
 			n.Stop()
 		}
-		return nil, fmt.Errorf("cluster limit reached (max %d)", o.maxClusters)
+		cluster.Fabric.Close()
+		return nil, fmt.Errorf("cluster limit reached (max %d)", max)
 	}
 	o.clusters[clusterID] = cluster
 	o.mu.Unlock()
+
+	o.persistCluster(cluster)
 
 	o.bus.Publish(events.Event{
 		Type:      events.EvtNodeStateChanged,
@@ -425,9 +504,9 @@ func (o *Orchestrator) GetCluster(id string) (*Cluster, error) {
 // DeleteCluster stops and removes the cluster with the given ID.
 func (o *Orchestrator) DeleteCluster(id string) error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	c, ok := o.clusters[id]
 	if !ok {
+		o.mu.Unlock()
 		return fmt.Errorf("cluster %s not found", id)
 	}
 	c.cancel()
@@ -436,6 +515,13 @@ func (o *Orchestrator) DeleteCluster(id string) error {
 	}
 	c.Fabric.Close() // stop link-worker goroutines to avoid leaks
 	delete(o.clusters, id)
+	o.mu.Unlock()
+
+	if o.db != nil {
+		if err := o.db.DeleteCluster(id); err != nil {
+			slog.Warn("persist delete cluster failed", "id", id, "error", err)
+		}
+	}
 	return nil
 }
 
@@ -451,11 +537,17 @@ func (o *Orchestrator) ListClusters() []*Cluster {
 }
 
 // AddNode adds a new node to an existing cluster.
-func (o *Orchestrator) AddNode(clusterID string) (node.Node, error) {
-	c, err := o.GetCluster(clusterID)
-	if err != nil {
-		return nil, err
+func (o *Orchestrator) AddNode(clusterID string) (result node.Node, retErr error) {
+	c, retErr := o.GetCluster(clusterID)
+	if retErr != nil {
+		return
 	}
+	// Persist updated node list after the lock is released (async, best-effort).
+	defer func() {
+		if retErr == nil {
+			go o.persistCluster(c)
+		}
+	}()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -471,7 +563,8 @@ func (o *Orchestrator) AddNode(clusterID string) (node.Node, error) {
 			leader.AddPeer(newID)
 		}
 		n.Start(c.ctx)
-		return n, nil
+		result = n
+		return
 
 	case node.StrategyMultiLeader:
 		resolver := conflict.NewLWWResolver()
@@ -486,7 +579,8 @@ func (o *Orchestrator) AddNode(clusterID string) (node.Node, error) {
 		c.NodeIDs = append(c.NodeIDs, newID)
 		c.Metrics.AddNode(n.GetMetrics())
 		n.Start(c.ctx)
-		return n, nil
+		result = n
+		return
 
 	case node.StrategyLeaderless:
 		qConfig := quorum.QuorumConfig{
@@ -518,24 +612,33 @@ func (o *Orchestrator) AddNode(clusterID string) (node.Node, error) {
 		c.Config.QuorumR = qConfig.R
 		c.Metrics.AddNode(n.GetMetrics())
 		n.Start(c.ctx)
-		return n, nil
+		result = n
+		return
 	}
 
-	return nil, fmt.Errorf("unsupported strategy: %s", c.Config.Strategy)
+	retErr = fmt.Errorf("unsupported strategy: %s", c.Config.Strategy)
+	return
 }
 
 // RemoveNode stops and deregisters a node from its cluster.
-func (o *Orchestrator) RemoveNode(clusterID, nodeID string) error {
-	c, err := o.GetCluster(clusterID)
-	if err != nil {
-		return err
+func (o *Orchestrator) RemoveNode(clusterID, nodeID string) (retErr error) {
+	c, retErr := o.GetCluster(clusterID)
+	if retErr != nil {
+		return
 	}
+	// Persist updated node list after the lock is released (async, best-effort).
+	defer func() {
+		if retErr == nil {
+			go o.persistCluster(c)
+		}
+	}()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	n, ok := c.Nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("node %s not found in cluster %s", nodeID, clusterID)
+		retErr = fmt.Errorf("node %s not found in cluster %s", nodeID, clusterID)
+		return
 	}
 	n.Stop()
 	c.Fabric.Deregister(nodeID)
@@ -555,7 +658,7 @@ func (o *Orchestrator) RemoveNode(clusterID, nodeID string) error {
 	for _, peer := range c.Nodes {
 		peer.RemovePeer(nodeID)
 	}
-	return nil
+	return
 }
 
 // PauseNode pauses a node so it stops processing messages.
