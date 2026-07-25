@@ -182,7 +182,7 @@ jobs:
 
       - name: Restore baseline from main
         id: cache-bench
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: /tmp/bench-baseline.txt
           key: bench-baseline-${{ github.sha }}
@@ -209,7 +209,7 @@ jobs:
 
       - name: Save as new baseline (main branch only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: /tmp/bench-current.txt
           key: bench-baseline-${{ github.sha }}
